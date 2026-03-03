@@ -3,6 +3,7 @@
 #include<memory>
 #include<string>
 #include<iostream>
+#include"koopa.h"
 using namespace std;
 extern string mode;
 class BaseAST

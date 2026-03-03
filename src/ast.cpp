@@ -1,13 +1,14 @@
 #include"include/ast.hpp"
 
 extern string mode;
+extern string out;
 void CompUnitAST::print()const
 {
 	if(mode=="-debug")
 	{
-		cout<<"CompUnit :\n{\n";
+		out+="CompUnit :\n{\n";
 		func_def->print();
-		cout<<"}\n";
+		out+="}\n";
 	}
 	if(mode=="-koopa")
 		func_def->print();
@@ -16,37 +17,50 @@ void FuncDefAST::print()const
 {
 	if(mode=="-debug")
 	{
-		cout<<"FuncDef "<<type<<" "<<ident<<" :\n{\n";
+		out+="FuncDef ";
+		out+=type;
+		out+=" ";
+		out+=ident;
+		out+=" :\n{\n";
 		block->print();
-		cout<<"}\n";
+		out+="}\n";
 	}
 	if(mode=="-koopa")
 	{
-		cout<<"fun @"<<ident<<"(): "<<type<<" {\n";
+		out+="fun @";
+		out+=ident;
+		out+="(): ";
+		out+=type;
+		out+=" {\n";
 		block->print();
-		cout<<"}\n";
+		out+="}\n";
 	}
 }
 void BlockAST::print()const
 {
 	if(mode=="-debug")
 	{
-		cout<<"Block :\n{\n";
+		out+="Block :\n{\n";
 		stmt->print();
-		cout<<"}\n";
+		out+="}\n";
 	}
 	if(mode=="-koopa")
 	{
-		cout<<"%entry:\n";
+		out+="%entry:\n";
 		stmt->print();
 	}
 }
 void StmtAST::print()const
 {
 	if(mode=="-debug")
-		cout<<"Stmt : "<<number<<"\n";
+	{
+		out+="Stmt : ";
+		out+=number;
+		out+="\n";
+	}
 	if(mode=="-koopa")
 	{
-		cout<<"  ret "<<number<<"\n";
+		out+="  ret ";
+		out+=to_string(number);
 	}
 }
