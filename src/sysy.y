@@ -63,7 +63,7 @@ FuncDef : FuncType IDENT '(' ')' Block
 
 FuncType : INT
 {
-	$$=new string("int");
+	$$=new string("i32");
 };
 
 Block : '{' Stmt '}'

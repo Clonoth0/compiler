@@ -20,8 +20,12 @@ void FuncDefAST::print()const
 		block->print();
 		cout<<"}\n";
 	}
-	else
+	if(mode=="-koopa")
+	{
+		cout<<"fun @"<<ident<<"(): "<<type<<" {\n";
 		block->print();
+		cout<<"}\n";
+	}
 }
 void BlockAST::print()const
 {
@@ -31,9 +35,18 @@ void BlockAST::print()const
 		stmt->print();
 		cout<<"}\n";
 	}
+	if(mode=="-koopa")
+	{
+		cout<<"%entry:\n";
+		stmt->print();
+	}
 }
 void StmtAST::print()const
 {
 	if(mode=="-debug")
 		cout<<"Stmt : "<<number<<"\n";
+	if(mode=="-koopa")
+	{
+		cout<<"  ret "<<number<<"\n";
+	}
 }
