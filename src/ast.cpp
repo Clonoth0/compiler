@@ -10,7 +10,7 @@ void CompUnitAST::print()const
 		func_def->print();
 		out+="}\n";
 	}
-	if(mode=="-koopa")
+	if(mode=="-koopa"||mode=="-riscv")
 		func_def->print();
 }
 void FuncDefAST::print()const
@@ -25,7 +25,7 @@ void FuncDefAST::print()const
 		block->print();
 		out+="}\n";
 	}
-	if(mode=="-koopa")
+	if(mode=="-koopa"||mode=="-riscv")
 	{
 		out+="fun @";
 		out+=ident;
@@ -44,7 +44,7 @@ void BlockAST::print()const
 		stmt->print();
 		out+="}\n";
 	}
-	if(mode=="-koopa")
+	if(mode=="-koopa"||mode=="-riscv")
 	{
 		out+="%entry:\n";
 		stmt->print();
@@ -58,9 +58,10 @@ void StmtAST::print()const
 		out+=number;
 		out+="\n";
 	}
-	if(mode=="-koopa")
+	if(mode=="-koopa"||mode=="-riscv")
 	{
-		out+="  ret ";
+		out+="\tret ";
 		out+=to_string(number);
+		out+="\n";
 	}
 }

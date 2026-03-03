@@ -6,4 +6,11 @@
 #include<iostream>
 #include"koopa.h"
 
-void parse_riscv(const char *str);
+void visit(const koopa_raw_program_t &program);
+void visit(const koopa_raw_slice_t &slice);
+void visit(const koopa_raw_function_t &func);
+void visit(const koopa_raw_basic_block_t &bb);
+void visit(const koopa_raw_value_t &value);
+void visit(const koopa_raw_integer_t &i);
+void visit(const koopa_raw_return_t &i);
+void solve_riscv(const char *str);

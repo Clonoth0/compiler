@@ -30,6 +30,9 @@ int main(int argc, const char *argv[]) {
 	if(mode=="-koopa")
 		cout<<out.c_str()<<"\n";
 	if(mode=="-riscv")
-		parse_riscv(out.c_str());
+	{
+		cerr<<out<<endl;
+		solve_riscv(out.c_str());
+	}
 	return 0;
 }

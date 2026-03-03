@@ -1,4 +1,5 @@
-fun @main(): i32 {
-%entry:
-  ret 0
-}
+.text
+	.global main
+main:
+	li a0, 0
+	ret
