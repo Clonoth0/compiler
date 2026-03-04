@@ -1,4 +1,5 @@
 #include<iostream>
+#include<optional>
 #include<cassert>
 #include"include/asm.hpp"
 #include"include/koopa.h"

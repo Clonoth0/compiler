@@ -3,6 +3,7 @@
 #include<cstdio>
 #include<memory>
 #include<string>
+#include<optional>
 #include<iostream>
 #include"koopa.h"
 

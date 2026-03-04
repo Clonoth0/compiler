@@ -9,7 +9,8 @@
 
 using namespace std;
 extern FILE *yyin;
-extern int yyparse(unique_ptr<BaseAST> &ast);
+extern int yyparse(unique_ptr<BaseAST>&ast);
+bool debug_flag=false;
 string mode="-debug";
 string out;
 
@@ -25,7 +26,6 @@ int main(int argc, const char *argv[]) {
 	unique_ptr<BaseAST>ast;
 	auto ret=yyparse(ast);
 	assert(!ret);
-
 	ast->print();
 	if(mode=="-koopa")
 		cout<<out.c_str()<<"\n";
