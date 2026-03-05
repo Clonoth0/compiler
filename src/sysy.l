@@ -30,8 +30,13 @@ Octal			0[0-7]*
 Hexadecimal		0[xX][0-9a-fA-F]+
 
 /* 运算符 */
+EQOP			("=="|"!=")
+RELOP			("<"|">"|"<="|">=")
 ADDOP			("+"|"-")
 NOTOP			("!")
+MULOP			("*"|"/"|"%")
+ANDOP			("&&")
+OROP			("||")
 
 %%
 
@@ -48,8 +53,13 @@ NOTOP			("!")
 {Octal}			{ yylval.int_val = strtol(yytext, nullptr, 0); return INT_CONST; }
 {Hexadecimal}	{ yylval.int_val = strtol(yytext, nullptr, 0); return INT_CONST; }
 
+{EQOP}			{ yylval.str_val = new string(yytext); return EQOP; }
+{RELOP}			{ yylval.str_val = new string(yytext); return RELOP; }
 {ADDOP}			{ yylval.str_val = new string(yytext); return ADDOP; }
 {NOTOP}			{ yylval.str_val = new string(yytext); return NOTOP; }
+{MULOP}			{ yylval.str_val = new string(yytext); return MULOP; }
+{ANDOP}			{ yylval.str_val = new string(yytext); return ANDOP; }
+{OROP}			{ yylval.str_val = new string(yytext); return OROP; }
 
 .				{ return yytext[0]; }
 

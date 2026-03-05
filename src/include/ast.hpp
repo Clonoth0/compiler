@@ -2,6 +2,7 @@
 
 #include<memory>
 #include<string>
+#include<utility>
 #include<optional>
 #include<iostream>
 #include"koopa.h"
@@ -48,7 +49,7 @@ class StmtAST:public BaseAST
 class ExpAST:public BaseAST
 {
 	public:
-		unique_ptr<BaseAST>unary_exp;
+		unique_ptr<BaseAST>exp;
 		Result print()const override;
 };
 class UnaryExpAST:public BaseAST
@@ -63,5 +64,47 @@ class PrimaryExpAST:public BaseAST
 	public:
 		unique_ptr<BaseAST>exp;
 		optional<int>number;
+		Result print()const override;
+};
+class MulExpAST:public BaseAST
+{
+	public:
+		unique_ptr<BaseAST>unary_exp;
+		optional<pair<unique_ptr<BaseAST>,string>>value;
+		Result print()const override;
+};
+class AddExpAST:public BaseAST
+{
+	public:
+		unique_ptr<BaseAST>mul_exp;
+		optional<pair<unique_ptr<BaseAST>,string>>value;
+		Result print()const override;
+};
+class RelExpAST:public BaseAST
+{
+	public:
+		unique_ptr<BaseAST>add_exp;
+		optional<pair<unique_ptr<BaseAST>,string>>value;
+		Result print()const override;
+};
+class EqExpAST:public BaseAST
+{
+	public:
+		unique_ptr<BaseAST>rel_exp;
+		optional<pair<unique_ptr<BaseAST>,string>>value;
+		Result print()const override;
+};
+class AndExpAST:public BaseAST
+{
+	public:
+		unique_ptr<BaseAST>eq_exp;
+		optional<pair<unique_ptr<BaseAST>,string>>value;
+		Result print()const override;
+};
+class OrExpAST:public BaseAST
+{
+	public:
+		unique_ptr<BaseAST>and_exp;
+		optional<pair<unique_ptr<BaseAST>,string>>value;
 		Result print()const override;
 };

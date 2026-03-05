@@ -35,11 +35,11 @@ using namespace std;
 }
 
 %token INT RETURN
-%token <str_val> IDENT ADDOP NOTOP
+%token <str_val> IDENT EQOP RELOP ADDOP NOTOP MULOP ANDOP OROP 
 %token <int_val> INT_CONST
 
 %type <str_val> FuncType
-%type <ast_val> FuncDef Block Stmt Exp PrimaryExp UnaryExp
+%type <ast_val> FuncDef Block Stmt Exp PrimaryExp UnaryExp MulExp AddExp RelExp EqExp AndExp OrExp
 %type <int_val> Number
 
 %%
@@ -80,10 +80,10 @@ Stmt : RETURN Exp ';'
 	$$=ast;
 };
 
-Exp : UnaryExp
+Exp : OrExp
 {
 	auto ast=new ExpAST;
-	ast->unary_exp=unique_ptr<BaseAST>($1);
+	ast->exp=unique_ptr<BaseAST>($1);
 	$$=ast;
 };
 
@@ -118,6 +118,90 @@ UnaryExp : PrimaryExp
 	auto ast=new UnaryExpAST;
 	ast->op=*unique_ptr<string>($1);
 	ast->exp=unique_ptr<BaseAST>($2);
+	$$=ast;
+};
+
+MulExp : UnaryExp
+{
+	auto ast=new MulExpAST;
+	ast->value=nullopt;
+	ast->unary_exp=unique_ptr<BaseAST>($1);
+	$$=ast;
+} | MulExp MULOP UnaryExp
+{
+	auto ast=new MulExpAST;
+	ast->value=make_pair(unique_ptr<BaseAST>($1),*unique_ptr<string>($2));
+	ast->unary_exp=unique_ptr<BaseAST>($3);
+	$$=ast;
+};
+
+AddExp : MulExp
+{
+	auto ast=new AddExpAST;
+	ast->value=nullopt;
+	ast->mul_exp=unique_ptr<BaseAST>($1);
+	$$=ast;
+} | AddExp ADDOP MulExp
+{
+	auto ast=new AddExpAST;
+	ast->value=make_pair(unique_ptr<BaseAST>($1),*unique_ptr<string>($2));
+	ast->mul_exp=unique_ptr<BaseAST>($3);
+	$$=ast;
+};
+
+RelExp : AddExp
+{
+	auto ast=new RelExpAST;
+	ast->value=nullopt;
+	ast->add_exp=unique_ptr<BaseAST>($1);
+	$$=ast;
+} | RelExp RELOP AddExp
+{
+	auto ast=new RelExpAST;
+	ast->value=make_pair(unique_ptr<BaseAST>($1),*unique_ptr<string>($2));
+	ast->add_exp=unique_ptr<BaseAST>($3);
+	$$=ast;
+};
+
+EqExp : RelExp
+{
+	auto ast=new EqExpAST;
+	ast->value=nullopt;
+	ast->rel_exp=unique_ptr<BaseAST>($1);
+	$$=ast;
+} | EqExp EQOP RelExp
+{
+	auto ast=new EqExpAST;
+	ast->value=make_pair(unique_ptr<BaseAST>($1),*unique_ptr<string>($2));
+	ast->rel_exp=unique_ptr<BaseAST>($3);
+	$$=ast;
+};
+
+AndExp : EqExp
+{
+	auto ast=new AndExpAST;
+	ast->value=nullopt;
+	ast->eq_exp=unique_ptr<BaseAST>($1);
+	$$=ast;
+} | AndExp ANDOP EqExp
+{
+	auto ast=new AndExpAST;
+	ast->value=make_pair(unique_ptr<BaseAST>($1),*unique_ptr<string>($2));
+	ast->eq_exp=unique_ptr<BaseAST>($3);
+	$$=ast;
+};
+
+OrExp : AndExp
+{
+	auto ast=new OrExpAST;
+	ast->value=nullopt;
+	ast->and_exp=unique_ptr<BaseAST>($1);
+	$$=ast;
+} | OrExp OROP AndExp
+{
+	auto ast=new OrExpAST;
+	ast->value=make_pair(unique_ptr<BaseAST>($1),*unique_ptr<string>($2));
+	ast->and_exp=unique_ptr<BaseAST>($3);
 	$$=ast;
 };
 

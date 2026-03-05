@@ -1,8 +1,11 @@
-fun @main(): i32 {
-%entry:
-	%0 = eq 6, 0
-	%1 = sub 0, %0
-	%2 = sub 0, %1
-	ret %2
-}
-
+.text
+	.global main
+main:
+	li t0, 11
+	xor t0, t0, x0
+	snez t0, t0
+	xor t1, x0, x0
+	snez t1, t1
+	or t0, t0, t1
+	mv a0, t0
+	ret

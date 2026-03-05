@@ -14,4 +14,5 @@ void visit(const koopa_raw_basic_block_t &bb);
 void visit(const koopa_raw_value_t &value);
 void visit(const koopa_raw_integer_t &i);
 void visit(const koopa_raw_return_t &i);
+void visit(const koopa_raw_binary_t &i,const koopa_raw_value_t &value);
 void solve_riscv(const char *str);
