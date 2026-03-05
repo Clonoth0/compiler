@@ -90,14 +90,28 @@ Result MulExpAST::print()const
 	{
 		auto x=value->first->print();
 		auto y=unary_exp->print();
-		Result now(false,total++);
-		if(value->second=="*")
-			out<<"\t"<<now<<" = mul "<<x<<", "<<y<<"\n";
-		if(value->second=="/")
-			out<<"\t"<<now<<" = div "<<x<<", "<<y<<"\n";
-		if(value->second=="%")
-			out<<"\t"<<now<<" = mod "<<x<<", "<<y<<"\n";
-		return Result(now);
+		if(x.imm&&y.imm)
+		{
+			Result now(true);
+			if(value->second=="*")
+				now.value=x.value*y.value;
+			if(value->second=="/")
+				now.value=x.value/y.value;
+			if(value->second=="%")
+				now.value=x.value%y.value;
+			return now;
+		}
+		else
+		{
+			Result now(false,total++);
+			if(value->second=="*")
+				out<<"\t"<<now<<" = mul "<<x<<", "<<y<<"\n";
+			if(value->second=="/")
+				out<<"\t"<<now<<" = div "<<x<<", "<<y<<"\n";
+			if(value->second=="%")
+				out<<"\t"<<now<<" = mod "<<x<<", "<<y<<"\n";
+			return Result(now);
+		}
 	}
 }
 Result AddExpAST::print()const
@@ -110,12 +124,24 @@ Result AddExpAST::print()const
 	{
 		auto x=value->first->print();
 		auto y=mul_exp->print();
-		Result now(false,total++);
-		if(value->second=="+")
-			out<<"\t"<<now<<" = add "<<x<<", "<<y<<"\n";
-		if(value->second=="-")
-			out<<"\t"<<now<<" = sub "<<x<<", "<<y<<"\n";
-		return now;
+		if(x.imm&&y.imm)
+		{
+			Result now(true);
+			if(value->second=="+")
+				now.value=x.value+y.value;
+			if(value->second=="-")
+				now.value=x.value-y.value;
+			return now;
+		}
+		else
+		{
+			Result now(false,total++);
+			if(value->second=="+")
+				out<<"\t"<<now<<" = add "<<x<<", "<<y<<"\n";
+			if(value->second=="-")
+				out<<"\t"<<now<<" = sub "<<x<<", "<<y<<"\n";
+			return now;
+		}
 	}
 }
 Result RelExpAST::print()const
@@ -128,16 +154,32 @@ Result RelExpAST::print()const
 	{
 		auto x=value->first->print();
 		auto y=add_exp->print();
-		Result now(false,total++);
-		if(value->second=="<")
-			out<<"\t"<<now<<" = lt "<<x<<", "<<y<<"\n";
-		if(value->second==">")
-			out<<"\t"<<now<<" = gt "<<x<<", "<<y<<"\n";
-		if(value->second=="<=")
-			out<<"\t"<<now<<" = le "<<x<<", "<<y<<"\n";
-		if(value->second==">=")
-			out<<"\t"<<now<<" = gt "<<x<<", "<<y<<"\n";
-		return now;
+		if(x.imm&&y.imm)
+		{
+			Result now(true);
+			if(value->second=="<")
+				now.value=(x.value<y.value);
+			if(value->second==">")
+				now.value=(x.value>y.value);
+			if(value->second=="<=")
+				now.value=(x.value<=y.value);
+			if(value->second==">=")
+				now.value=(x.value>=y.value);
+			return now;
+		}
+		else
+		{
+			Result now(false,total++);
+			if(value->second=="<")
+				out<<"\t"<<now<<" = lt "<<x<<", "<<y<<"\n";
+			if(value->second==">")
+				out<<"\t"<<now<<" = gt "<<x<<", "<<y<<"\n";
+			if(value->second=="<=")
+				out<<"\t"<<now<<" = le "<<x<<", "<<y<<"\n";
+			if(value->second==">=")
+				out<<"\t"<<now<<" = gt "<<x<<", "<<y<<"\n";
+			return now;
+		}
 	}
 }
 Result EqExpAST::print()const
@@ -150,12 +192,24 @@ Result EqExpAST::print()const
 	{
 		auto x=value->first->print();
 		auto y=rel_exp->print();
-		Result now(false,total++);
-		if(value->second=="==")
-			out<<"\t"<<now<<" = eq "<<x<<", "<<y<<"\n";
-		if(value->second=="!=")
-			out<<"\t"<<now<<" = ne "<<x<<", "<<y<<"\n";
-		return now;
+		if(x.imm&&y.imm)
+		{
+			Result now(true);
+			if(value->second=="==")
+				now.value=(x.value==y.value);
+			if(value->second=="!=")
+				now.value=(x.value!=y.value);
+			return now;
+		}
+		else
+		{
+			Result now(false,total++);
+			if(value->second=="==")
+				out<<"\t"<<now<<" = eq "<<x<<", "<<y<<"\n";
+			if(value->second=="!=")
+				out<<"\t"<<now<<" = ne "<<x<<", "<<y<<"\n";
+			return now;
+		}
 	}
 }
 Result AndExpAST::print()const
@@ -168,13 +222,22 @@ Result AndExpAST::print()const
 	{
 		auto x=value->first->print();
 		auto y=eq_exp->print();
-		Result u(false,total++);
-		out<<"\t"<<u<<" = ne "<<x<<", 0\n";
-		Result v(false,total++);
-		out<<"\t"<<v<<" = ne "<<y<<", 0\n";
-		Result now(false,total++);
-		out<<"\t"<<now<<" = and "<<u<<", "<<v<<"\n";
-		return now;
+		if(x.imm&&y.imm)
+		{
+			Result now(true);
+			now.value=(x.value&&y.value);
+			return now;
+		}
+		else
+		{
+			Result u(false,total++);
+			out<<"\t"<<u<<" = ne "<<x<<", 0\n";
+			Result v(false,total++);
+			out<<"\t"<<v<<" = ne "<<y<<", 0\n";
+			Result now(false,total++);
+			out<<"\t"<<now<<" = and "<<u<<", "<<v<<"\n";
+			return now;
+		}
 	}
 }
 Result OrExpAST::print()const
@@ -187,12 +250,21 @@ Result OrExpAST::print()const
 	{
 		auto x=value->first->print();
 		auto y=and_exp->print();
-		Result u(false,total++);
-		out<<"\t"<<u<<" = ne "<<x<<", 0\n";
-		Result v(false,total++);
-		out<<"\t"<<v<<" = ne "<<y<<", 0\n";
-		Result now(false,total++);
-		out<<"\t"<<now<<" = or "<<u<<", "<<v<<"\n";
-		return now;
+		if(x.imm&&y.imm)
+		{
+			Result now(true);
+			now.value=(x.value||y.value);
+			return now;
+		}
+		else
+		{
+			Result u(false,total++);
+			out<<"\t"<<u<<" = ne "<<x<<", 0\n";
+			Result v(false,total++);
+			out<<"\t"<<v<<" = ne "<<y<<", 0\n";
+			Result now(false,total++);
+			out<<"\t"<<now<<" = or "<<u<<", "<<v<<"\n";
+			return now;
+		}
 	}
 }

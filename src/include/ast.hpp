@@ -12,13 +12,17 @@ class Result
 	public:
 		bool imm;
 		int value;
-		Result():imm(),value(){}
-		Result(bool _imm,int _value):imm(_imm),value(_value){}
+		Result(bool _imm,int _value=0):imm(_imm),value(_value){}
 };
 class koopa_stream
 {
 	public:
 		string value;
+		koopa_stream &operator <<(const char *rhs)
+		{
+			value+=rhs;
+			return *this;
+		}
 		koopa_stream &operator <<(const string &rhs)
 		{
 			value+=rhs;
