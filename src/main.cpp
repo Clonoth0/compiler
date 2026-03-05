@@ -10,9 +10,8 @@
 using namespace std;
 extern FILE *yyin;
 extern int yyparse(unique_ptr<BaseAST>&ast);
-bool debug_flag=false;
 string mode="-debug";
-string out;
+extern koopa_stream out;
 
 int main(int argc, const char *argv[]) {
 	assert(argc == 5);
@@ -31,7 +30,7 @@ int main(int argc, const char *argv[]) {
 		cout<<out.c_str()<<"\n";
 	if(mode=="-riscv")
 	{
-		cerr<<out<<endl;
+		cerr<<out.c_str()<<endl;
 		solve_riscv(out.c_str());
 	}
 	return 0;

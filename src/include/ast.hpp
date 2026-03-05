@@ -10,9 +10,35 @@ using namespace std;
 class Result
 {
 	public:
+		bool imm;
+		int value;
+		Result():imm(),value(){}
+		Result(bool _imm,int _value):imm(_imm),value(_value){}
+};
+class koopa_stream
+{
+	public:
 		string value;
-		Result():value(){}
-		Result(string s):value(s){}
+		koopa_stream &operator <<(const string &rhs)
+		{
+			value+=rhs;
+			return *this;
+		}
+		koopa_stream &operator <<(const Result &rhs)
+		{
+			if(!rhs.imm)
+				value+="%";
+			value+=to_string(rhs.value);
+			return *this;
+		} 
+		const char *c_str()
+		{
+			return value.c_str();
+		}
+		operator string()const
+		{
+			return value;
+		}
 };
 class BaseAST
 {
