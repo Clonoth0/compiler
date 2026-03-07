@@ -1,8 +1,37 @@
-fun @main(): i32 {
-%entry:
-	@_0 = alloc i32
-	store 1, @_0
-	%0 = load @_0
-	ret %0
-}
-
+.text
+	.global main
+main:
+	addi sp, sp, -48
+	li t1, 10
+	sw t1, 0(sp)
+	lw t1, 0(sp)
+	sw t1, 4(sp)
+	lw t1, 4(sp)
+	li t2, 1
+	add t1, t1, t2
+	sw t1, 8(sp)
+	lw t1, 8(sp)
+	sw t1, 12(sp)
+	lw t1, 0(sp)
+	sw t1, 16(sp)
+	lw t1, 12(sp)
+	sw t1, 20(sp)
+	lw t1, 16(sp)
+	lw t2, 20(sp)
+	mul t1, t1, t2
+	sw t1, 24(sp)
+	lw t1, 24(sp)
+	li t2, 1
+	add t1, t1, t2
+	sw t1, 28(sp)
+	lw t1, 28(sp)
+	sw t1, 32(sp)
+	lw t1, 32(sp)
+	sw t1, 36(sp)
+	lw t1, 36(sp)
+	li t2, 66
+	rem t1, t1, t2
+	sw t1, 40(sp)
+	lw a0, 40(sp)
+	addi sp, sp, 48
+	ret

@@ -69,21 +69,55 @@ static void _mv(const string &rd,const string &rs)
 {
 	cout<<"\tmv "<<rd<<", "<<rs<<"\n";
 }
-static unordered_map<koopa_raw_value_t,string>reg_map;
-static string new_reg()
+static void _lw(const string &rs,const string &rd,const int &imm)
 {
-	static int cnt=0;
-	string res;
-	if(cnt<8)
-		res="t"+to_string(cnt);
+	if(imm>=-2048&&imm<=2047)
+		cout<<"\tlw "<<rs<<", "<<imm<<"("<<rd<<")\n";
 	else
-		if(cnt<16)
-			res="a"+to_string(cnt-8);
-		else
-			res="s"+to_string(cnt-16);
-	++cnt;
-	return res;
+	{
+		_li("t0",imm);
+		_add("t0",rd,"t0");
+		_lw(rs,"t0",0);
+	}
 }
+static void _sw(const string &rs2,const string &rs1,const int &imm)
+{
+	if(imm>=-2048&&imm<=2047)
+		cout<<"\tsw "<<rs2<<", "<<imm<<"("<<rs1<<")\n";
+	else
+	{
+		_li("t0",imm);
+		_add("t0",rs1,"t0");
+		_sw(rs2,"t0",0);
+	}
+}
+static void addi(const string &rd,const string &rs1,const int &imm)
+{
+	if(imm>=-2048&&imm<=2047)
+		cout<<"\taddi "<<rd<<", "<<rs1<<", "<<imm<<"\n";
+	else
+	{
+		_li("t0",imm);
+		_add(rd,rs1,"t0");
+	}
+}
+class Address
+{
+	private:
+		unordered_map<koopa_raw_value_t,int>f;
+		int t=0;
+	public:
+		int cnt=0;
+		int query(const koopa_raw_value_t &v)
+		{
+			auto p=f.find(v);
+			if(p!=f.end())
+				return p->second;
+			f[v]=t;
+			t+=4;
+			return t-4;
+		}
+}addr;
 void visit(const koopa_raw_program_t &program)
 {
 	visit(program.values);
@@ -115,6 +149,21 @@ void visit(const koopa_raw_function_t &func)
 {
 	cout<<"\t.global "<<func->name+1<<"\n";
 	cout<<func->name+1<<":"<<"\n";
+	int cnt=0;
+	for(size_t i=0;i<func->bbs.len;++i)
+	{
+		auto bb=reinterpret_cast<koopa_raw_basic_block_t>(func->bbs.buffer[i]);
+		cnt+=bb->insts.len;
+		for(size_t j=0;j<bb->insts.len;++j)
+		{
+			auto inst=reinterpret_cast<koopa_raw_value_t>(bb->insts.buffer[j]);
+			if(inst->ty->tag==KOOPA_RTT_UNIT)
+				--cnt;
+		}
+	}
+	cnt=(cnt*4+15)/16*16;
+	addi("sp","sp",-cnt);
+	addr.cnt=cnt;
 	visit(func->bbs);
 }
 void visit(const koopa_raw_basic_block_t &bb)
@@ -132,16 +181,20 @@ void visit(const koopa_raw_value_t &value)
 		case KOOPA_RVT_INTEGER:
 			visit(kind.data.integer);
 			break;
+		case KOOPA_RVT_ALLOC:
+			break;
+		case KOOPA_RVT_LOAD:
+			visit(kind.data.load,value);
+			break;
+		case KOOPA_RVT_STORE:
+			visit(kind.data.store);
+			break;
 		case KOOPA_RVT_BINARY:
 			visit(kind.data.binary,value);
 			break;
 		default:
 			assert(false);
 	}
-}
-void visit(const koopa_raw_integer_t &i)
-{
-	cout<<i.value;
 }
 void visit(const koopa_raw_return_t &i)
 {
@@ -150,44 +203,41 @@ void visit(const koopa_raw_return_t &i)
 		if(i.value->kind.tag==KOOPA_RVT_INTEGER)
 			_li("a0",i.value->kind.data.integer.value);
 		else
-			_mv("a0",reg_map[i.value]);
+			_lw("a0","sp",addr.query(i.value));
 	}
 	else
 		_li("a0",0);
+	addi("sp","sp",addr.cnt);
 	_ret();
 }
-static bool allocate_reg(const koopa_raw_value_t &value)
+void visit(const koopa_raw_integer_t &i)
 {
-	if(value->kind.tag==KOOPA_RVT_INTEGER)
-	{
-		if(!value->kind.data.integer.value)
-		{
-			reg_map[value]="x0";
-			return false;
-		}
-		else
-		{
-			auto reg=new_reg();
-			_li(reg,value->kind.data.integer.value);
-			reg_map[value]=reg;
-			return true;
-		}
-	}
-	return true;
+	cout<<i.value;
+}
+void visit(const koopa_raw_load_t &i,const koopa_raw_value_t &value)
+{
+	_lw("t1","sp",addr.query(i.src));
+	_sw("t1","sp",addr.query(value));
+}
+void visit(const koopa_raw_store_t &i)
+{
+	if(i.value->kind.tag==KOOPA_RVT_INTEGER)
+		_li("t1",i.value->kind.data.integer.value);
+	else
+		_lw("t1","sp",addr.query(i.value));
+	_sw("t1","sp",addr.query(i.dest));
 }
 void visit(const koopa_raw_binary_t &i,const koopa_raw_value_t &value)
 {
-	bool u=allocate_reg(i.lhs),v=allocate_reg(i.rhs);
-	if(u)
-		reg_map[value]=reg_map[i.lhs];
+	if(i.lhs->kind.tag==KOOPA_RVT_INTEGER)
+		_li("t1",i.lhs->kind.data.integer.value);
 	else
-		if(v)
-			reg_map[value]=reg_map[i.rhs];
-		else
-			reg_map[value]=new_reg();
-	const auto now=reg_map[value];
-	const auto lhs=reg_map[i.lhs];
-	const auto rhs=reg_map[i.rhs];
+		_lw("t1","sp",addr.query(i.lhs));
+	if(i.rhs->kind.tag==KOOPA_RVT_INTEGER)
+		_li("t2",i.rhs->kind.data.integer.value);
+	else
+		_lw("t2","sp",addr.query(i.rhs));
+	const string now="t1",lhs="t1",rhs="t2";
 	switch(i.op)
 	{
 		case KOOPA_RBO_NOT_EQ:
@@ -236,6 +286,7 @@ void visit(const koopa_raw_binary_t &i,const koopa_raw_value_t &value)
 		default:
 			assert(false);
 	}
+	_sw(now,"sp",addr.query(value));
 }
 void solve_riscv(const char *str)
 {
