@@ -5,6 +5,8 @@
 #include<utility>
 #include<optional>
 #include<iostream>
+#include<vector>
+#include<cassert>
 #include"koopa.h"
 using namespace std;
 class Result
@@ -12,7 +14,15 @@ class Result
 	public:
 		bool imm;
 		int value;
-		Result(bool _imm,int _value=0):imm(_imm),value(_value){}
+		Result(bool _imm=false,int _value=0):imm(_imm),value(_value){}
+		auto operator <=>(const Result &rhs)const=default;
+};
+class Symbol
+{
+	public:
+		bool addr;
+		int value;
+		Symbol(bool _addr=false,int _value=0):addr(_addr),value(_value){}
 };
 class koopa_stream
 {
@@ -34,7 +44,13 @@ class koopa_stream
 				value+="%";
 			value+=to_string(rhs.value);
 			return *this;
-		} 
+		}
+		koopa_stream &operator <<(const Symbol &rhs)
+		{
+			assert(rhs.addr);
+			value+="@_"+to_string(rhs.value);
+			return *this;
+		}
 		const char *c_str()
 		{
 			return value.c_str();
@@ -50,10 +66,11 @@ class BaseAST
 		virtual ~BaseAST()=default;
 		virtual Result print()const=0;
 };
+using node=unique_ptr<BaseAST>;
 class CompUnitAST:public BaseAST
 {
 	public:
-		unique_ptr<BaseAST>func_def;
+		node func_def;
 		Result print()const override;
 };
 class FuncDefAST:public BaseAST
@@ -61,80 +78,143 @@ class FuncDefAST:public BaseAST
 	public:
 		string type;
 		string ident;
-		unique_ptr<BaseAST>block;
+		node block;
 		Result print()const override;
 };
 class BlockAST:public BaseAST
 {
 	public:
-		unique_ptr<BaseAST>stmt;
+		unique_ptr<vector<node>>blocks;
+		Result print()const override;
+};
+class BlockItemAST:public BaseAST
+{
+	public:
+		node block;
 		Result print()const override;
 };
 class StmtAST:public BaseAST
 {
 	public:
-		unique_ptr<BaseAST>exp;
+		optional<string>lval;
+		node exp;
 		Result print()const override;
 };
+
+
+class DeclAST:public BaseAST
+{
+	public:
+		node decl;
+		Result print()const override;
+};
+class ConstDeclAST:public BaseAST
+{
+	public:
+		unique_ptr<vector<node>>defs;
+		Result print()const override;
+};
+class ConstDefAST:public BaseAST
+{
+	public:
+		string ident;
+		node init;
+		Result print()const override;
+};
+class ConstInitValAST:public BaseAST
+{
+	public:
+		node exp;
+		Result print()const override;
+};
+class ConstExpAST:public BaseAST
+{
+	public:
+		node exp;
+		Result print()const override;
+};
+class VarDeclAST:public BaseAST
+{
+	public:
+		unique_ptr<vector<node>>defs;
+		Result print()const override;
+};
+class VarDefAST:public BaseAST
+{
+	public:
+		string ident;
+		optional<node>init;
+		Result print()const override;
+};
+class InitValAST:public BaseAST
+{
+	public:
+		node exp;
+		Result print()const override;
+};
+
+
+
 class ExpAST:public BaseAST
 {
 	public:
-		unique_ptr<BaseAST>exp;
+		node exp;
 		Result print()const override;
 };
 class UnaryExpAST:public BaseAST
 {
 	public:
 		optional<string>op;
-		unique_ptr<BaseAST>exp;
+		node exp;
 		Result print()const override;
 };
 class PrimaryExpAST:public BaseAST
 {
 	public:
-		unique_ptr<BaseAST>exp;
+		node exp;
+		optional<string>lval;
 		optional<int>number;
 		Result print()const override;
 };
 class MulExpAST:public BaseAST
 {
 	public:
-		unique_ptr<BaseAST>unary_exp;
-		optional<pair<unique_ptr<BaseAST>,string>>value;
+		node unary_exp;
+		optional<pair<node,string>>value;
 		Result print()const override;
 };
 class AddExpAST:public BaseAST
 {
 	public:
-		unique_ptr<BaseAST>mul_exp;
-		optional<pair<unique_ptr<BaseAST>,string>>value;
+		node mul_exp;
+		optional<pair<node,string>>value;
 		Result print()const override;
 };
 class RelExpAST:public BaseAST
 {
 	public:
-		unique_ptr<BaseAST>add_exp;
-		optional<pair<unique_ptr<BaseAST>,string>>value;
+		node add_exp;
+		optional<pair<node,string>>value;
 		Result print()const override;
 };
 class EqExpAST:public BaseAST
 {
 	public:
-		unique_ptr<BaseAST>rel_exp;
-		optional<pair<unique_ptr<BaseAST>,string>>value;
+		node rel_exp;
+		optional<pair<node,string>>value;
 		Result print()const override;
 };
 class AndExpAST:public BaseAST
 {
 	public:
-		unique_ptr<BaseAST>eq_exp;
-		optional<pair<unique_ptr<BaseAST>,string>>value;
+		node eq_exp;
+		optional<pair<node,string>>value;
 		Result print()const override;
 };
 class OrExpAST:public BaseAST
 {
 	public:
-		unique_ptr<BaseAST>and_exp;
-		optional<pair<unique_ptr<BaseAST>,string>>value;
+		node and_exp;
+		optional<pair<node,string>>value;
 		Result print()const override;
 };
