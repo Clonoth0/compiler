@@ -36,15 +36,15 @@ using namespace std;
 	vector<node> *vec_val;
 }
 
-%token INT RETURN CONST
+%token INT RETURN CONST IF ELSE
 %token <str_val> IDENT EQOP RELOP ADDOP NOTOP MULOP ANDOP OROP 
 %token <int_val> INT_CONST
 
 %type <str_val> FuncType LVal
-%type <ast_val> FuncDef Decl ConstDecl ConstDef ConstInitVal VarDecl VarDef InitVal
 %type <vec_val> ExConstDef ExVarDef ExBlockItem
+%type <ast_val> FuncDef Decl ConstDecl ConstDef ConstInitVal VarDecl VarDef InitVal
 %type <ast_val> Block BlockItem
-%type <ast_val> Stmt 
+%type <ast_val> Stmt MatchedStmt DanglingStmt
 %type <ast_val> Exp PrimaryExp UnaryExp MulExp AddExp RelExp EqExp AndExp OrExp ConstExp
 %type <int_val> Number
 
@@ -189,51 +189,88 @@ BlockItem : Decl
 	$$=ast;
 };
 
-Stmt : LVal '=' Exp ';'
+Stmt : MatchedStmt
 {
 	auto ast=new StmtAST;
+	ast->stmt=node($1);
+	$$=ast;
+} | DanglingStmt
+{
+	auto ast=new StmtAST;
+	ast->stmt=node($1);
+};
+
+MatchedStmt : LVal '=' Exp ';'
+{
+	auto ast=new MatchedStmtAST;
 	ast->lval=*unique_ptr<string>($1);
 	ast->exp=node($3);
 	ast->block=nullopt;
-	ast->ret=false;
+	ast->type=_OTHER;
 	$$=ast;
 } | ';'
 {
-	auto ast=new StmtAST;
+	auto ast=new MatchedStmtAST;
 	ast->lval=nullopt;
 	ast->exp=nullopt;
 	ast->block=nullopt;
-	ast->ret=false;
+	ast->type=_OTHER;
 	$$=ast;
 } | Exp ';'
 {
-	auto ast=new StmtAST;
+	auto ast=new MatchedStmtAST;
 	ast->lval=nullopt;
 	ast->exp=node($1);
 	ast->block=nullopt;
-	ast->ret=false;
+	ast->type=_OTHER;
 	$$=ast;
 } | Block
 {
-	auto ast=new StmtAST;
+	auto ast=new MatchedStmtAST;
 	ast->lval=nullopt;
 	ast->exp=nullopt;
 	ast->block=node($1);
-	ast->ret=false;
+	ast->type=_OTHER;
 } | RETURN ';'
 {
-	auto ast=new StmtAST;
+	auto ast=new MatchedStmtAST;
 	ast->lval=nullopt;
 	ast->exp=nullopt;
 	ast->block=nullopt;
-	ast->ret=true;
+	ast->type=_RETURN;
 } | RETURN Exp ';'
 {
-	auto ast=new StmtAST;
+	auto ast=new MatchedStmtAST;
 	ast->lval=nullopt;
 	ast->exp=node($2);
 	ast->block=nullopt;
-	ast->ret=true;
+	ast->type=_RETURN;
+	$$=ast;
+} | IF '(' Exp ')' MatchedStmt ELSE MatchedStmt
+{
+	auto ast=new MatchedStmtAST;
+	ast->lval=nullopt;
+	ast->exp=node($3);
+	ast->block=nullopt;
+	ast->stmt1=node($5);
+	ast->stmt2=node($7);
+	ast->type=_IF;
+	$$=ast;
+};
+
+DanglingStmt : IF '(' Exp ')' Stmt
+{
+	auto ast=new DanglingStmtAST;
+	ast->exp=node($3);
+	ast->matched_stmt=nullopt;
+	ast->stmt=node($5);
+	$$=ast;
+} | IF '(' Exp ')' MatchedStmt ELSE DanglingStmt
+{
+	auto ast=new DanglingStmtAST;
+	ast->exp=node($3);
+	ast->matched_stmt=node($5);
+	ast->stmt=node($7);
 	$$=ast;
 };
 

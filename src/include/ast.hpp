@@ -9,6 +9,10 @@
 #include<cassert>
 #include"koopa.h"
 using namespace std;
+enum StmtType
+{
+	_IF,_WHILE,_BREAK,_CONTINUE,_RETURN,_OTHER
+};
 class Result
 {
 	public:
@@ -96,13 +100,26 @@ class BlockItemAST:public BaseAST
 class StmtAST:public BaseAST
 {
 	public:
-		optional<string>lval;
-		optional<node>exp,block;
-		bool ret;
+		node stmt;
 		Result print()const override;
 };
-
-
+class MatchedStmtAST:public BaseAST
+{
+	public:
+		optional<string>lval;
+		optional<node>exp,block;
+		node stmt1,stmt2;
+		StmtType type;
+		Result print()const override;
+};
+class DanglingStmtAST:public BaseAST
+{
+	public:
+		node exp;
+		optional<node>matched_stmt;
+		node stmt;
+		Result print()const override;
+};
 class DeclAST:public BaseAST
 {
 	public:
