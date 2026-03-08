@@ -194,12 +194,46 @@ Stmt : LVal '=' Exp ';'
 	auto ast=new StmtAST;
 	ast->lval=*unique_ptr<string>($1);
 	ast->exp=node($3);
+	ast->block=nullopt;
+	ast->ret=false;
 	$$=ast;
+} | ';'
+{
+	auto ast=new StmtAST;
+	ast->lval=nullopt;
+	ast->exp=nullopt;
+	ast->block=nullopt;
+	ast->ret=false;
+	$$=ast;
+} | Exp ';'
+{
+	auto ast=new StmtAST;
+	ast->lval=nullopt;
+	ast->exp=node($1);
+	ast->block=nullopt;
+	ast->ret=false;
+	$$=ast;
+} | Block
+{
+	auto ast=new StmtAST;
+	ast->lval=nullopt;
+	ast->exp=nullopt;
+	ast->block=node($1);
+	ast->ret=false;
+} | RETURN ';'
+{
+	auto ast=new StmtAST;
+	ast->lval=nullopt;
+	ast->exp=nullopt;
+	ast->block=nullopt;
+	ast->ret=true;
 } | RETURN Exp ';'
 {
 	auto ast=new StmtAST;
 	ast->lval=nullopt;
 	ast->exp=node($2);
+	ast->block=nullopt;
+	ast->ret=true;
 	$$=ast;
 };
 

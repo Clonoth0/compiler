@@ -97,7 +97,8 @@ class StmtAST:public BaseAST
 {
 	public:
 		optional<string>lval;
-		node exp;
+		optional<node>exp,block;
+		bool ret;
 		Result print()const override;
 };
 

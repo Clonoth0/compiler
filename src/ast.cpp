@@ -7,7 +7,31 @@ bool debug_flag=false;
 koopa_stream out;
 static int result_total=0,symbol_total=0;
 static unordered_map<string,Symbol>symbol_table;
-
+static vector<vector<pair<string,optional<Symbol>>>>mem;
+static void symbol_insert(const string &ident,const Symbol &symbol)
+{
+	assert(!mem.empty());
+	auto p=symbol_table.find(ident);
+	if(p==symbol_table.end())
+	{
+		mem.back().emplace_back(ident,nullopt);
+		symbol_table[ident]=symbol;
+	}
+	else
+	{
+		mem.back().emplace_back(ident,p->second);
+		p->second=symbol;
+	}
+}
+static void symbol_reset(const string &ident,const optional<Symbol>&symbol)
+{
+	auto p=symbol_table.find(ident);
+	assert(p!=symbol_table.end());
+	if(symbol.has_value())
+		p->second=*symbol;
+	else
+		symbol_table.erase(p);
+}
 static Symbol _alloc()
 {
 	Symbol symbol(true,symbol_total++);
@@ -39,6 +63,7 @@ Result FuncDefAST::print()const
 	if(debug_flag)
 		out<<"FuncDef :\n";
 	out<<"fun @"<<ident<<"(): "<<type<<" {\n";
+	out<<"%entry:\n";
 	auto x=block->print();
 	out<<"}\n";
 	return x;
@@ -47,10 +72,13 @@ Result BlockAST::print()const
 {
 	if(debug_flag)
 		out<<"Block :\n";
-	out<<"%entry:\n";
+	mem.push_back({});
 	Result now;
 	for(const auto &block:*blocks)
 		now=block->print();
+	for(const auto &[ident,symbol]:mem.back())
+		symbol_reset(ident,symbol);
+	mem.pop_back();
 	return now;
 }
 Result BlockItemAST::print()const
@@ -65,17 +93,41 @@ Result StmtAST::print()const
 		out<<"Stmt :\n";
 	if(lval.has_value())
 	{
+		assert(exp.has_value());
 		auto now=symbol_table[*lval];
-		auto x=exp->print();
+		auto x=(*exp)->print();
 		_store(x,now);
 		return x;
 	}
 	else
-	{
-		auto x=exp->print();
-		out<<"\tret "<<x<<"\n";
-		return x;
-	}
+		if(ret)
+		{
+			if(exp.has_value())
+			{
+				auto x=(*exp)->print();
+				out<<"\tret "<<x<<"\n";
+				return x;
+			}
+			else
+			{
+				out<<"\tret\n";
+				return Result();
+			}
+		}
+		else
+			if(block.has_value())
+			{
+				auto x=(*block)->print();
+				return x;
+			}
+			else
+				if(exp.has_value())
+				{
+					auto x=(*exp)->print();
+					return x;
+				}
+				else
+					return Result();
 }
 
 
@@ -102,7 +154,7 @@ Result ConstDefAST::print()const
 	if(debug_flag)
 		out<<"ConstDef :\n";
 	auto now=init->print();
-	symbol_table[ident]=Symbol(false,now.value);
+	symbol_insert(ident,Symbol(false,now.value));
 	return now;
 }
 Result ConstInitValAST::print()const
@@ -141,7 +193,7 @@ Result VarDefAST::print()const
 		value=(*init)->print();
 		_store(value,now);
 	}
-	symbol_table[ident]=now;
+	symbol_insert(ident,now);
 	return value;
 }
 Result InitValAST::print()const
