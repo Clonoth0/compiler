@@ -1,127 +1,28 @@
-fun @main(): i32 {
-%entry:
-	@_0 = alloc i32
-	store 1, @_0
-	@_1 = alloc i32
-	store 0, @_1
-	@_2 = alloc i32
-	store 4, @_2
-	@_3 = alloc i32
-	store 5, @_3
-	%0 = load @_0
-	%1 = eq %0, 1
-	@_4 = alloc i32
-	br %1, %then_1, %else_1
-%then_1:
-	store 1, @_4
-	jump %end_1
-%else_1:
-	%2 = load @_0
-	%3 = eq %2, 2
-	%4 = ne %3, 0
-	store %4, @_4
-	jump %end_1
-%end_1:
-	%5 = load @_4
-	br %5, %then_0, %end_0
-%then_0:
-	jump %end_0
-%end_0:
-	%6 = load @_1
-	%7 = eq %6, 0
-	@_5 = alloc i32
-	br %7, %then_3, %else_3
-%then_3:
-	store 1, @_5
-	jump %end_3
-%else_3:
-	%8 = load @_1
-	%9 = eq %8, 1
-	%10 = ne %9, 0
-	store %10, @_5
-	jump %end_3
-%end_3:
-	%11 = load @_5
-	br %11, %then_2, %else_2
-%then_2:
-	%12 = load @_3
-	%13 = add %12, 1
-	store %13, @_3
-	jump %end_2
-%else_2:
-	jump %end_2
-%end_2:
-	%14 = load @_0
-	@_6 = alloc i32
-	br %14, %then_5, %else_5
-%then_5:
-	%15 = load @_1
-	%16 = ne %15, 0
-	store %16, @_6
-	jump %end_5
-%else_5:
-	store 0, @_6
-	jump %end_5
-%end_5:
-	%17 = load @_6
-	@_7 = alloc i32
-	br %17, %then_6, %else_6
-%then_6:
-	store 1, @_7
-	jump %end_6
-%else_6:
-	%18 = load @_2
-	@_8 = alloc i32
-	br %18, %then_7, %else_7
-%then_7:
-	%19 = load @_3
-	%20 = ne %19, 0
-	store %20, @_8
-	jump %end_7
-%else_7:
-	store 0, @_8
-	jump %end_7
-%end_7:
-	%21 = load @_8
-	%22 = ne %21, 0
-	store %22, @_7
-	jump %end_6
-%end_6:
-	%23 = load @_7
-	br %23, %then_4, %end_4
-%then_4:
-	%24 = load @_3
-	%25 = add %24, 1
-	store %25, @_3
-	jump %end_4
-%end_4:
-	%26 = load @_3
-	@_9 = alloc i32
-	br %26, %then_8, %else_8
-%then_8:
-	store 1, @_9
-	jump %end_8
-%else_8:
-	%27 = load @_2
-	%28 = eq %27, 0
-	%29 = ne %28, 0
-	store %29, @_9
-	jump %end_8
-%end_8:
-	%30 = load @_9
-	ret %30
-%ex_0:
-	%31 = load @_3
-	@_10 = alloc i32
-	br %31, %then_9, %else_9
-%then_9:
-	store 1, @_10
-	jump %end_9
-%else_9:
-	store 1, @_10
-	jump %end_9
-%end_9:
-	%32 = load @_10
-	ret %32
-}
-
+.text
+	.global main
+main:
+	addi sp, sp, -16
+entry:
+	li t1, 1
+	sw t1, 0(sp)
+	li t1, 2
+	sw t1, 4(sp)
+	lw t1, 0(sp)
+	sw t1, 8(sp)
+	lw t1, 8(sp)
+	bnez t1, then_0
+	j else_0
+then_0:
+	li t1, 3
+	sw t1, 4(sp)
+	j end_0
+else_0:
+	li t1, 4
+	sw t1, 4(sp)
+	j end_0
+end_0:
+	lw t1, 4(sp)
+	sw t1, 12(sp)
+	lw a0, 12(sp)
+	addi sp, sp, 16
+	ret

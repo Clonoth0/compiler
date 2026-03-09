@@ -148,7 +148,7 @@ void visit(const koopa_raw_slice_t &slice)
 void visit(const koopa_raw_function_t &func)
 {
 	cout<<"\t.global "<<func->name+1<<"\n";
-	cout<<func->name+1<<":"<<"\n";
+	cout<<func->name+1<<":\n";
 	int cnt=0;
 	for(size_t i=0;i<func->bbs.len;++i)
 	{
@@ -168,6 +168,7 @@ void visit(const koopa_raw_function_t &func)
 }
 void visit(const koopa_raw_basic_block_t &bb)
 {
+	cout<<bb->name+1<<":\n";
 	visit(bb->insts);
 }
 void visit(const koopa_raw_value_t &value)
@@ -191,6 +192,12 @@ void visit(const koopa_raw_value_t &value)
 			break;
 		case KOOPA_RVT_BINARY:
 			visit(kind.data.binary,value);
+			break;
+		case KOOPA_RVT_BRANCH:
+			visit(kind.data.branch);
+			break;
+		case KOOPA_RVT_JUMP:
+			visit(kind.data.jump);
 			break;
 		default:
 			assert(false);
@@ -287,6 +294,19 @@ void visit(const koopa_raw_binary_t &i,const koopa_raw_value_t &value)
 			assert(false);
 	}
 	_sw(now,"sp",addr.query(value));
+}
+void visit(const koopa_raw_branch_t &i)
+{
+	if(i.cond->kind.tag==KOOPA_RVT_INTEGER)
+		_li("t1",i.cond->kind.data.integer.value);
+	else
+		_lw("t1","sp",addr.query(i.cond));
+	cout<<"\tbnez t1, "<<i.true_bb->name+1<<"\n";
+	cout<<"\tj "<<i.false_bb->name+1<<"\n";
+}
+void visit(const koopa_raw_jump_t &i)
+{
+	cout<<"\tj "<<i.target->name+1<<"\n";
 }
 void solve_riscv(const char *str)
 {
