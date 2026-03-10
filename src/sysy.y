@@ -36,7 +36,7 @@ using namespace std;
 	vector<node> *vec_val;
 }
 
-%token INT RETURN CONST IF ELSE
+%token INT RETURN CONST IF ELSE WHILE BREAK CONTINUE
 %token <str_val> IDENT EQOP RELOP ADDOP NOTOP MULOP ANDOP OROP 
 %token <int_val> INT_CONST
 
@@ -255,6 +255,31 @@ MatchedStmt : LVal '=' Exp ';'
 	ast->stmt1=node($5);
 	ast->stmt2=node($7);
 	ast->type=_IF;
+	$$=ast;
+} | WHILE '(' Exp ')' Stmt
+{
+	auto ast=new MatchedStmtAST;
+	ast->lval=nullopt;
+	ast->exp=node($3);
+	ast->block=nullopt;
+	ast->stmt1=node($5);
+	ast->type=_WHILE;
+	$$=ast;
+} | BREAK ';'
+{
+	auto ast=new MatchedStmtAST;
+	ast->lval=nullopt;
+	ast->exp=nullopt;
+	ast->block=nullopt;
+	ast->type=_BREAK;
+	$$=ast;
+} | CONTINUE ';'
+{
+	auto ast=new MatchedStmtAST;
+	ast->lval=nullopt;
+	ast->exp=nullopt;
+	ast->block=nullopt;
+	ast->type=_CONTINUE;
 	$$=ast;
 };
 

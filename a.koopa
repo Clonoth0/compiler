@@ -1,28 +1,9 @@
-.text
-	.global main
-main:
-	addi sp, sp, -16
-entry:
-	li t1, 1
-	sw t1, 0(sp)
-	li t1, 2
-	sw t1, 4(sp)
-	lw t1, 0(sp)
-	sw t1, 8(sp)
-	lw t1, 8(sp)
-	bnez t1, then_0
-	j else_0
-then_0:
-	li t1, 3
-	sw t1, 4(sp)
-	j end_0
-else_0:
-	li t1, 4
-	sw t1, 4(sp)
-	j end_0
-end_0:
-	lw t1, 4(sp)
-	sw t1, 12(sp)
-	lw a0, 12(sp)
-	addi sp, sp, 16
-	ret
+fun @main(): i32 {
+%entry:
+	@_0 = alloc i32
+	store 2, @_0
+	%0 = load @_0
+	%1 = ne %0, 0
+	ret %1
+}
+

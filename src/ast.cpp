@@ -7,21 +7,22 @@ bool debug_flag=false;
 koopa_stream out;
 static int result_total=0,symbol_total=0;
 static unordered_map<string,Symbol>symbol_table;
-static vector<vector<pair<string,optional<Symbol>>>>mem;
-static int if_total=0,ex_total=0; // basic block
+static vector<vector<pair<string,optional<Symbol>>>>symbol_stack;
+static int if_total=0,while_total=0,ex_total=0; // basic block
 static bool need_jump=false,need_ex=false;
+static vector<int>while_stack;
 static void symbol_insert(const string &ident,const Symbol &symbol)
 {
-	assert(!mem.empty());
+	assert(!symbol_stack.empty());
 	auto p=symbol_table.find(ident);
 	if(p==symbol_table.end())
 	{
-		mem.back().emplace_back(ident,nullopt);
+		symbol_stack.back().emplace_back(ident,nullopt);
 		symbol_table[ident]=symbol;
 	}
 	else
 	{
-		mem.back().emplace_back(ident,p->second);
+		symbol_stack.back().emplace_back(ident,p->second);
 		p->second=symbol;
 	}
 }
@@ -34,8 +35,22 @@ static void symbol_reset(const string &ident,const optional<Symbol>&symbol)
 	else
 		symbol_table.erase(p);
 }
+static void add_basic_block(const string &str)
+{
+	if(need_jump)
+		out<<"\tjump "<<str<<"\n";
+	out<<str<<":\n";
+	need_jump=true;
+	need_ex=false;
+}
+static void check_ex()
+{
+	if(need_ex)
+		add_basic_block("%ex_"+to_string(ex_total++));
+}
 static Symbol _alloc()
 {
+	check_ex();
 	Symbol symbol(true,symbol_total++);
 	out<<"\t"<<symbol<<" = alloc i32\n";
 	need_jump=true;
@@ -44,6 +59,7 @@ static Symbol _alloc()
 static Result _load(const Symbol &symbol)
 {
 	assert(symbol.addr);
+	check_ex();
 	Result result(false,result_total++);
 	out<<"\t"<<result<<" = load "<<symbol<<"\n";
 	need_jump=true;
@@ -54,57 +70,74 @@ static void _store(const Result &result,const Symbol &symbol)
 	assert(symbol.addr);
 	out<<"\t"<<"store "<<result<<", "<<symbol<<"\n";
 }
-static void add_basic_block(const string &str)
-{
-	if(need_jump)
-		out<<"\tjump "<<str<<"\n";
-	out<<str<<":\n";
-	need_jump=true;
-	need_ex=false;
-}
-static string basic_block_then(const int &x)
+static string _if_then(const int &x)
 {
 	return "%then_"+to_string(x);
 }
-static string basic_block_else(const int &x)
+static string _if_else(const int &x)
 {
 	return "%else_"+to_string(x);
 }
-static string basic_block_end(const int &x)
+static string _if_end(const int &x)
 {
-	return "%end_"+to_string(x);
+	return "%if_end_"+to_string(x);
+}
+static string _while_entry(const int &x)
+{
+	return "%entry_"+to_string(x);
+}
+static string _while_body(const int &x)
+{
+	return "%body_"+to_string(x);
+}
+static string _while_end(const int &x)
+{
+	return "%while_end_"+to_string(x);
 }
 static void solve_if_else(const node &exp,const node &stmt1,const node &stmt2)
 {
-	int x=if_total++;
+	int i=if_total++;
 	auto e=exp->print();
-	out<<"\tbr "<<e<<", "<<basic_block_then(x)<<", "<<basic_block_else(x)<<"\n";
+	out<<"\tbr "<<e<<", "<<_if_then(i)<<", "<<_if_else(i)<<"\n";
 	need_jump=false;
-	add_basic_block(basic_block_then(x));
+	add_basic_block(_if_then(i));
 	stmt1->print();
 	if(need_jump)
 	{
-		out<<"\tjump "<<basic_block_end(x)<<"\n";
+		out<<"\tjump "<<_if_end(i)<<"\n";
 		need_jump=false;
 	}
-	add_basic_block(basic_block_else(x));
+	add_basic_block(_if_else(i));
 	stmt2->print();
-	add_basic_block(basic_block_end(x));
+	add_basic_block(_if_end(i));
 }
 static void solve_if(const node &exp,const node &stmt)
 {
-	int x=if_total++;
+	int i=if_total++;
 	auto e=exp->print();
-	out<<"\tbr "<<e<<", "<<basic_block_then(x)<<", "<<basic_block_end(x)<<"\n";
+	out<<"\tbr "<<e<<", "<<_if_then(i)<<", "<<_if_end(i)<<"\n";
 	need_jump=false;
-	add_basic_block(basic_block_then(x));
+	add_basic_block(_if_then(i));
 	stmt->print();
-	add_basic_block(basic_block_end(x));
+	add_basic_block(_if_end(i));
 }
-static void check_ex()
+static void solve_while(const node &exp,const node &stmt)
 {
-	if(need_ex)
-		add_basic_block("%ex_"+to_string(ex_total++));
+	int i=while_total++;
+	while_stack.push_back(i);
+	add_basic_block(_while_entry(i));
+	auto e=exp->print();
+	out<<"\tbr "<<e<<", "<<_while_body(i)<<", "<<_while_end(i)<<"\n";
+	need_jump=false;
+	add_basic_block(_while_body(i));
+	stmt->print();
+	if(need_jump)
+	{
+		out<<"\tjump "<<_while_entry(i)<<"\n";
+		need_jump=false;
+	}
+	add_basic_block(_while_end(i));
+	while_stack.pop_back();
 }
 Result CompUnitAST::print()const
 {
@@ -118,7 +151,7 @@ Result FuncDefAST::print()const
 	if(debug_flag)
 		out<<"FuncDef :\n";
 	out<<"fun @"<<ident<<"(): "<<type<<" {\n";
-	out<<"%entry:\n";
+	add_basic_block("%entry");
 	auto x=block->print();
 	out<<"}\n";
 	return x;
@@ -127,13 +160,13 @@ Result BlockAST::print()const
 {
 	if(debug_flag)
 		out<<"Block :\n";
-	mem.push_back({});
+	symbol_stack.push_back({});
 	Result now;
 	for(const auto &block:*blocks)
 		now=block->print();
-	for(const auto &[ident,symbol]:mem.back())
+	for(const auto &[ident,symbol]:symbol_stack.back())
 		symbol_reset(ident,symbol);
-	mem.pop_back();
+	symbol_stack.pop_back();
 	return now;
 }
 Result BlockItemAST::print()const
@@ -155,7 +188,30 @@ Result MatchedStmtAST::print()const
 		out<<"MatchedStmt :\n";
 	if(type==_IF)
 	{
+		assert(exp.has_value());
 		solve_if_else(*exp,stmt1,stmt2);
+		return Result();
+	}
+	if(type==_WHILE)
+	{
+		assert(exp.has_value());
+		solve_while(*exp,stmt1);	
+		return Result();
+	}
+	if(type==_BREAK)
+	{
+		int i=while_stack.back();
+		out<<"\tjump "<<_while_end(i)<<"\n";
+		need_jump=false;
+		need_ex=true;
+		return Result();
+	}
+	if(type==_CONTINUE)
+	{
+		int i=while_stack.back();
+		out<<"\tjump "<<_while_entry(i)<<"\n";
+		need_jump=false;
+		need_ex=true;
 		return Result();
 	}
 	if(lval.has_value())
@@ -492,7 +548,9 @@ Result AndExpAST::print()const
 			else
 			{
 				auto y=eq_exp->print();
-				return y;
+				Result v(false,result_total++);
+				out<<"\t"<<v<<" = ne "<<y<<", 0\n";
+				return v;
 			}
 		}
 		else
@@ -500,9 +558,9 @@ Result AndExpAST::print()const
 			auto p=_alloc();
 			int i=if_total++;
 			check_ex();
-			out<<"\tbr "<<x<<", "<<basic_block_then(i)<<", "<<basic_block_else(i)<<"\n";
+			out<<"\tbr "<<x<<", "<<_if_then(i)<<", "<<_if_else(i)<<"\n";
 			need_jump=false;
-			add_basic_block(basic_block_then(i));
+			add_basic_block(_if_then(i));
 			auto y=eq_exp->print();
 			if(y.imm)
 				_store(Result(true,(bool)y.value),p);
@@ -512,11 +570,11 @@ Result AndExpAST::print()const
 				out<<"\t"<<v<<" = ne "<<y<<", 0\n";
 				_store(v,p);
 			}
-			out<<"\tjump "<<basic_block_end(i)<<"\n";
+			out<<"\tjump "<<_if_end(i)<<"\n";
 			need_jump=false;
-			add_basic_block(basic_block_else(i));
+			add_basic_block(_if_else(i));
 			_store(Result(true,0),p);
-			add_basic_block(basic_block_end(i));
+			add_basic_block(_if_end(i));
 			return _load(p);
 		}
 	}
@@ -537,7 +595,9 @@ Result OrExpAST::print()const
 			else
 			{
 				auto y=and_exp->print();
-				return y;
+				Result v(false,result_total++);
+				out<<"\t"<<v<<" = ne "<<y<<", 0\n";
+				return v;
 			}
 		}
 		else
@@ -545,13 +605,13 @@ Result OrExpAST::print()const
 			auto p=_alloc();
 			int i=if_total++;
 			check_ex();
-			out<<"\tbr "<<x<<", "<<basic_block_then(i)<<", "<<basic_block_else(i)<<"\n";
+			out<<"\tbr "<<x<<", "<<_if_then(i)<<", "<<_if_else(i)<<"\n";
 			need_jump=false;
-			add_basic_block(basic_block_then(i));
+			add_basic_block(_if_then(i));
 			_store(Result(true,1),p);
-			out<<"\tjump "<<basic_block_end(i)<<"\n";
+			out<<"\tjump "<<_if_end(i)<<"\n";
 			need_jump=false;
-			add_basic_block(basic_block_else(i));
+			add_basic_block(_if_else(i));
 			auto y=and_exp->print();
 			if(y.imm)
 				_store(Result(true,(bool)y.value),p);
@@ -561,7 +621,7 @@ Result OrExpAST::print()const
 				out<<"\t"<<v<<" = ne "<<y<<", 0\n";
 				_store(v,p);
 			}
-			add_basic_block(basic_block_end(i));
+			add_basic_block(_if_end(i));
 			return _load(p);
 		}
 	}
