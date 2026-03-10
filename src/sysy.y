@@ -36,13 +36,17 @@ using namespace std;
 	vector<node> *vec_val;
 }
 
-%token INT RETURN CONST IF ELSE WHILE BREAK CONTINUE
+%nonassoc LOWER_THAN_ELSE
+%nonassoc ELSE
+
+%token VOID INT RETURN CONST IF ELSE WHILE BREAK CONTINUE
 %token <str_val> IDENT EQOP RELOP ADDOP NOTOP MULOP ANDOP OROP 
 %token <int_val> INT_CONST
 
 %type <str_val> FuncType LVal
-%type <vec_val> ExConstDef ExVarDef ExBlockItem
-%type <ast_val> FuncDef Decl ConstDecl ConstDef ConstInitVal VarDecl VarDef InitVal
+%type <vec_val> CompUnit ExConstDef ExVarDef ExBlockItem FuncFParams FuncRParams
+%type <ast_val> FuncDef FuncFParam
+%type <ast_val> Decl ConstDecl ConstDef ConstInitVal VarDecl VarDef InitVal
 %type <ast_val> Block BlockItem
 %type <ast_val> Stmt MatchedStmt DanglingStmt
 %type <ast_val> Exp PrimaryExp UnaryExp MulExp AddExp RelExp EqExp AndExp OrExp ConstExp
@@ -50,11 +54,23 @@ using namespace std;
 
 %%
 
-CompUnit : FuncDef 
+Program : CompUnit
 {
-	auto comp_unit=make_unique<CompUnitAST>();
-	comp_unit->func_def=node($1);
-	ast=std::move(comp_unit);
+	auto program=make_unique<ProgramAST>();
+	program->defs=unique_ptr<vector<node>>($1);
+	ast=std::move(program);
+}
+
+CompUnit : FuncDef
+{
+	auto defs=new vector<node>;
+	defs->push_back(node($1));
+	$$=defs;
+} | CompUnit FuncDef
+{
+	auto defs=$1;
+	defs->push_back(node($2));
+	$$=defs;
 };
 
 Decl : ConstDecl
@@ -113,13 +129,13 @@ VarDecl : INT VarDef ExVarDef ';'
 
 ExVarDef : 
 {
-	auto defs=new vector<node>;
-	$$=defs;
+	auto vec=new vector<node>;
+	$$=vec;
 } | ExVarDef ',' VarDef
 {
-	auto defs=$1;
-	defs->push_back(node($3));
-	$$=defs;
+	auto vec=$1;
+	vec->push_back(node($3));
+	$$=vec;
 };
 
 VarDef : IDENT
@@ -150,13 +166,44 @@ FuncDef : FuncType IDENT '(' ')' Block
 	auto ast=new FuncDefAST;
 	ast->type=*unique_ptr<string>($1);
 	ast->ident=*unique_ptr<string>($2);
+	ast->params=make_unique<vector<node>>();
 	ast->block=node($5);
+	$$=ast;
+} | FuncType IDENT '(' FuncFParam FuncFParams ')' Block 
+{
+	auto ast=new FuncDefAST;
+	ast->type=*unique_ptr<string>($1);
+	ast->ident=*unique_ptr<string>($2);
+	ast->params=unique_ptr<vector<node>>($5);
+	ast->params->insert(ast->params->begin(),node($4));
+	ast->block=node($7);
 	$$=ast;
 };
 
-FuncType : INT
+FuncFParams : 
 {
-	$$=new string("i32");
+	auto params=new vector<node>;
+	$$=params;
+} | FuncFParams ',' FuncFParam
+{
+	auto params=$1;
+	params->push_back(node($3));
+	$$=params;
+};
+
+FuncFParam : INT IDENT
+{
+	auto ast=new FuncFParamAST;
+	ast->ident=*unique_ptr<string>($2);
+	$$=ast;
+};
+
+FuncType : VOID
+{
+	$$=new string("");
+} | INT
+{
+	$$=new string(" : i32");
 };
 
 Block : '{' ExBlockItem '}'
@@ -339,19 +386,48 @@ UnaryExp : PrimaryExp
 	auto ast=new UnaryExpAST;
 	ast->op=nullopt;
 	ast->exp=node($1);
+	ast->func=false;
 	$$=ast;
 } | ADDOP UnaryExp 
 {
 	auto ast=new UnaryExpAST;
 	ast->op=*unique_ptr<string>($1);
 	ast->exp=node($2);
+	ast->func=false;
 	$$=ast;
 } | NOTOP UnaryExp
 {
 	auto ast=new UnaryExpAST;
 	ast->op=*unique_ptr<string>($1);
 	ast->exp=node($2);
+	ast->func=false;
 	$$=ast;
+} | IDENT '(' ')'
+{
+	auto ast=new UnaryExpAST;
+	ast->op=*unique_ptr<string>($1);
+	ast->params=make_unique<vector<node>>();
+	ast->func=true;
+	$$=ast;
+} | IDENT '(' Exp FuncRParams ')'
+{
+	auto ast=new UnaryExpAST;
+	ast->op=*unique_ptr<string>($1);
+	ast->params=unique_ptr<vector<node>>($4);
+	ast->params->insert(ast->params->begin(),node($3));
+	ast->func=true;
+	$$=ast;
+};
+
+FuncRParams : 
+{
+	auto params=new vector<node>;
+	$$=params;
+} | FuncRParams ',' Exp
+{
+	auto params=$1;
+	params->push_back(node($3));
+	$$=params;
 };
 
 MulExp : UnaryExp

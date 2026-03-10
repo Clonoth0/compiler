@@ -1,16 +1,20 @@
 #include<cassert>
 #include<map>
 #include<unordered_map>
+#include<unordered_set>
 #include"include/ast.hpp"
 
 bool debug_flag=false;
 koopa_stream out;
 static int result_total=0,symbol_total=0;
 static unordered_map<string,Symbol>symbol_table;
+static unordered_map<string,bool>func_table={{"main",true},{"getint",true},{"getch",true},{"getarray",true},{"putint",false},{"putch",false},{"putarray",false},{"starttime",false},{"stoptime",false}}; // int : true, void : false
 static vector<vector<pair<string,optional<Symbol>>>>symbol_stack;
+static unordered_set<string>builtin_funcs={"main","getint","getch","getarray","putint","putch","putarray","starttime","stoptime"};
 static int if_total=0,while_total=0,ex_total=0; // basic block
 static bool need_jump=false,need_ex=false;
 static vector<int>while_stack;
+static bool first_block;
 static void symbol_insert(const string &ident,const Symbol &symbol)
 {
 	assert(!symbol_stack.empty());
@@ -139,28 +143,82 @@ static void solve_while(const node &exp,const node &stmt)
 	add_basic_block(_while_end(i));
 	while_stack.pop_back();
 }
-Result CompUnitAST::print()const
+Result ProgramAST::print()const
 {
 	if(debug_flag)
-		out<<"CompUnit :\n";
-	auto x=func_def->print();
-	return x;
+		out<<"Program :\n";
+	symbol_stack.push_back({});
+	for(const auto &def:*defs)
+		def->print();
+	return Result();
 }
+static vector<Symbol>def_params;
 Result FuncDefAST::print()const
 {
 	if(debug_flag)
 		out<<"FuncDef :\n";
-	out<<"fun @"<<ident<<"(): "<<type<<" {\n";
-	add_basic_block("%entry");
-	auto x=block->print();
+	if(type.empty())
+		func_table[ident]=false;
+	else
+		func_table[ident]=true;
+	symbol_stack.push_back({});
+	string str;
+	if(builtin_funcs.count(ident))
+		str="@"+ident;
+	else
+	{
+		Symbol now(true,symbol_total++);
+		symbol_table[ident]=now;
+		str=now;
+	}
+	out<<"fun "<<str<<"(";
+	bool first=true;
+	def_params.clear();
+	for(const auto &param:*params)
+	{
+		if(!first)
+			out<<", ";
+		param->print();
+		first=false;
+	}
+	out<<")"<<type<<" {\n";
+	str.erase(str.begin());
+	add_basic_block("%entry_"+str);
+	first_block=true;
+	block->print();
+	if(need_jump)
+	{
+		out<<"\tret\n";
+		need_jump=false;
+	}
 	out<<"}\n";
-	return x;
+	return Result();
+}
+Result FuncFParamAST::print()const
+{
+	if(debug_flag)
+		out<<"FuncFParam :\n";
+	Symbol now(true,symbol_total++);
+	def_params.push_back(now);
+	out<<now<<"_: i32";
+	symbol_insert(ident,now);
+	return Result();
 }
 Result BlockAST::print()const
 {
 	if(debug_flag)
 		out<<"Block :\n";
-	symbol_stack.push_back({});
+	if(!first_block)
+		symbol_stack.push_back({});
+	else
+	{
+		for(const auto &now:def_params)
+		{
+			out<<"\t"<<now<<" = alloc i32\n";
+			out<<"\tstore "<<now<<"_, "<<now<<"\n";
+		}
+		first_block=false;
+	}
 	Result now;
 	for(const auto &block:*blocks)
 		now=block->print();
@@ -349,6 +407,44 @@ Result UnaryExpAST::print()const
 {
 	if(debug_flag)
 		out<<"UnaryExp :\n";
+	if(func)
+	{
+		assert(op.has_value());
+		string str;
+		if(builtin_funcs.count(*op))
+			str="@"+*op;
+		else
+			str=symbol_table[*op];
+		int size=params->size();
+		vector<Result>result(size);
+		for(int i=0;i<size;++i)
+			result[i]=(*params)[i]->print();
+		if(func_table[*op])
+		{
+			Result now(false,result_total++);
+			out<<"\t"<<now<<" = call "<<str<<"(";
+			for(int i=0;i<size;++i)
+			{
+				if(i)
+					out<<", ";
+				out<<result[i];
+			}
+			out<<")\n";
+			return now;
+		}
+		else
+		{
+			out<<"\tcall "<<str<<"(";
+			for(int i=0;i<size;++i)
+			{
+				if(i)
+					out<<", ";
+				out<<result[i];
+			}
+			out<<")\n";
+			return Result();
+		}
+	}
 	if(!op.has_value())
 	{
 		auto x=exp->print();

@@ -45,6 +45,7 @@ OROP			("||")
 {BlockComment}	{ /* 忽略, 不做任何操作 */ }
 
 "const"			{ return CONST; }
+"void"			{ return VOID; }
 "int"			{ return INT; }
 "return"		{ return RETURN; }
 "if"			{ return IF; }

@@ -27,11 +27,28 @@ class Symbol
 		bool addr;
 		int value;
 		Symbol(bool _addr=false,int _value=0):addr(_addr),value(_value){}
+		operator string()const
+		{
+			return "@_"+to_string(value);
+		}
 };
 class koopa_stream
 {
 	public:
 		string value;
+		koopa_stream()
+		{
+			value=
+R"(decl @getint(): i32
+decl @getch(): i32
+decl @getarray(*i32): i32
+decl @putint(i32)
+decl @putch(i32)
+decl @putarray(i32, *i32)
+decl @starttime()
+decl @stoptime()
+)";
+		}
 		koopa_stream &operator <<(const char *rhs)
 		{
 			value+=rhs;
@@ -63,6 +80,11 @@ class koopa_stream
 		{
 			return value;
 		}
+		// ~koopa_stream()
+		// {
+		// 	cerr<<"~\n";
+		// 	cerr<<value;
+		// }
 };
 class BaseAST
 {
@@ -71,10 +93,16 @@ class BaseAST
 		virtual Result print()const=0;
 };
 using node=unique_ptr<BaseAST>;
+class ProgramAST:public BaseAST
+{
+	public:
+		unique_ptr<vector<node>>defs;
+		Result print()const override;
+};
 class CompUnitAST:public BaseAST
 {
 	public:
-		node func_def;
+		node def;
 		Result print()const override;
 };
 class FuncDefAST:public BaseAST
@@ -83,6 +111,13 @@ class FuncDefAST:public BaseAST
 		string type;
 		string ident;
 		node block;
+		unique_ptr<vector<node>>params;
+		Result print()const override;
+};
+class FuncFParamAST:public BaseAST
+{
+	public:
+		string ident;
 		Result print()const override;
 };
 class BlockAST:public BaseAST
@@ -184,6 +219,8 @@ class UnaryExpAST:public BaseAST
 	public:
 		optional<string>op;
 		node exp;
+		unique_ptr<vector<node>>params;
+		bool func;
 		Result print()const override;
 };
 class PrimaryExpAST:public BaseAST
