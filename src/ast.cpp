@@ -14,7 +14,7 @@ static unordered_set<string>builtin_funcs={"main","getint","getch","getarray","p
 static int if_total=0,while_total=0,ex_total=0; // basic block
 static bool need_jump=false,need_ex=false;
 static vector<int>while_stack;
-static bool first_block;
+static bool first_block,is_global;
 static void symbol_insert(const string &ident,const Symbol &symbol)
 {
 	assert(!symbol_stack.empty());
@@ -149,7 +149,10 @@ Result ProgramAST::print()const
 		out<<"Program :\n";
 	symbol_stack.push_back({});
 	for(const auto &def:*defs)
+	{
+		is_global=true;
 		def->print();
+	}
 	return Result();
 }
 static vector<Symbol>def_params;
@@ -157,6 +160,7 @@ Result FuncDefAST::print()const
 {
 	if(debug_flag)
 		out<<"FuncDef :\n";
+	is_global=false;
 	if(type.empty())
 		func_table[ident]=false;
 	else
@@ -378,15 +382,29 @@ Result VarDefAST::print()const
 {
 	if(debug_flag)
 		out<<"VarDef :\n";
-	auto now=_alloc();
-	Result value;
-	if(init.has_value())
+	if(is_global)
 	{
-		value=(*init)->print();
-		_store(value,now);
+		Symbol now(true,symbol_total++);
+		Result value(true,0);
+		if(init.has_value())
+			value=(*init)->print();
+		assert(value.imm);
+		symbol_insert(ident,now);
+		out<<"global "<<now<<" = alloc i32, "<<value<<"\n";
+		return value;
 	}
-	symbol_insert(ident,now);
-	return value;
+	else
+	{
+		auto now=_alloc();
+		Result value;
+		if(init.has_value())
+		{
+			value=(*init)->print();
+			_store(value,now);
+		}
+		symbol_insert(ident,now);
+		return value;
+	}
 }
 Result InitValAST::print()const
 {

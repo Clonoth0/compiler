@@ -36,14 +36,11 @@ using namespace std;
 	vector<node> *vec_val;
 }
 
-%nonassoc LOWER_THAN_ELSE
-%nonassoc ELSE
-
 %token VOID INT RETURN CONST IF ELSE WHILE BREAK CONTINUE
 %token <str_val> IDENT EQOP RELOP ADDOP NOTOP MULOP ANDOP OROP 
 %token <int_val> INT_CONST
 
-%type <str_val> FuncType LVal
+%type <str_val> LVal
 %type <vec_val> CompUnit ExConstDef ExVarDef ExBlockItem FuncFParams FuncRParams
 %type <ast_val> FuncDef FuncFParam
 %type <ast_val> Decl ConstDecl ConstDef ConstInitVal VarDecl VarDef InitVal
@@ -61,10 +58,14 @@ Program : CompUnit
 	ast=std::move(program);
 }
 
-CompUnit : FuncDef
+CompUnit :
 {
 	auto defs=new vector<node>;
-	defs->push_back(node($1));
+	$$=defs;
+} | CompUnit Decl
+{
+	auto defs=$1;
+	defs->push_back(node($2));
 	$$=defs;
 } | CompUnit FuncDef
 {
@@ -161,18 +162,35 @@ InitVal : ConstExp
 
 
 
-FuncDef : FuncType IDENT '(' ')' Block 
+FuncDef : VOID IDENT '(' ')' Block 
 {
 	auto ast=new FuncDefAST;
-	ast->type=*unique_ptr<string>($1);
+	ast->type="";
 	ast->ident=*unique_ptr<string>($2);
 	ast->params=make_unique<vector<node>>();
 	ast->block=node($5);
 	$$=ast;
-} | FuncType IDENT '(' FuncFParam FuncFParams ')' Block 
+} | INT IDENT '(' ')' Block 
 {
 	auto ast=new FuncDefAST;
-	ast->type=*unique_ptr<string>($1);
+	ast->type=" : i32";
+	ast->ident=*unique_ptr<string>($2);
+	ast->params=make_unique<vector<node>>();
+	ast->block=node($5);
+	$$=ast;
+} | VOID IDENT '(' FuncFParam FuncFParams ')' Block 
+{
+	auto ast=new FuncDefAST;
+	ast->type="";
+	ast->ident=*unique_ptr<string>($2);
+	ast->params=unique_ptr<vector<node>>($5);
+	ast->params->insert(ast->params->begin(),node($4));
+	ast->block=node($7);
+	$$=ast;
+} | INT IDENT '(' FuncFParam FuncFParams ')' Block 
+{
+	auto ast=new FuncDefAST;
+	ast->type=" : i32";
 	ast->ident=*unique_ptr<string>($2);
 	ast->params=unique_ptr<vector<node>>($5);
 	ast->params->insert(ast->params->begin(),node($4));
@@ -196,14 +214,6 @@ FuncFParam : INT IDENT
 	auto ast=new FuncFParamAST;
 	ast->ident=*unique_ptr<string>($2);
 	$$=ast;
-};
-
-FuncType : VOID
-{
-	$$=new string("");
-} | INT
-{
-	$$=new string(" : i32");
 };
 
 Block : '{' ExBlockItem '}'
@@ -245,6 +255,7 @@ Stmt : MatchedStmt
 {
 	auto ast=new StmtAST;
 	ast->stmt=node($1);
+	$$=ast;
 };
 
 MatchedStmt : LVal '=' Exp ';'
@@ -278,6 +289,7 @@ MatchedStmt : LVal '=' Exp ';'
 	ast->exp=nullopt;
 	ast->block=node($1);
 	ast->type=_OTHER;
+	$$=ast;
 } | RETURN ';'
 {
 	auto ast=new MatchedStmtAST;

@@ -99,12 +99,6 @@ class ProgramAST:public BaseAST
 		unique_ptr<vector<node>>defs;
 		Result print()const override;
 };
-class CompUnitAST:public BaseAST
-{
-	public:
-		node def;
-		Result print()const override;
-};
 class FuncDefAST:public BaseAST
 {
 	public:
