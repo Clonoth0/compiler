@@ -11,7 +11,7 @@
 using namespace std;
 enum StmtType
 {
-	_IF,_WHILE,_BREAK,_CONTINUE,_RETURN,_OTHER
+	_IF,_IF_ELSE,_WHILE,_BREAK,_CONTINUE,_RETURN,_OTHER
 };
 class Result
 {
@@ -151,8 +151,8 @@ class DanglingStmtAST:public BaseAST
 {
 	public:
 		node exp;
-		optional<node>matched_stmt;
-		node stmt;
+		node stmt1,stmt2;
+		StmtType type;
 		Result print()const override;
 };
 class DeclAST:public BaseAST

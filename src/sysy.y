@@ -301,9 +301,9 @@ MatchedStmt : LVal '=' Exp ';'
 	ast->block=nullopt;
 	ast->stmt1=node($5);
 	ast->stmt2=node($7);
-	ast->type=_IF;
+	ast->type=_IF_ELSE;
 	$$=ast;
-} | WHILE '(' Exp ')' Stmt
+} | WHILE '(' Exp ')' MatchedStmt
 {
 	auto ast=new MatchedStmtAST;
 	ast->lval=nullopt;
@@ -334,15 +334,23 @@ DanglingStmt : IF '(' Exp ')' Stmt
 {
 	auto ast=new DanglingStmtAST;
 	ast->exp=node($3);
-	ast->matched_stmt=nullopt;
-	ast->stmt=node($5);
+	ast->stmt1=node($5);
+	ast->type=_IF;
 	$$=ast;
 } | IF '(' Exp ')' MatchedStmt ELSE DanglingStmt
 {
 	auto ast=new DanglingStmtAST;
 	ast->exp=node($3);
-	ast->matched_stmt=node($5);
-	ast->stmt=node($7);
+	ast->stmt1=node($5);
+	ast->stmt2=node($7);
+	ast->type=_IF_ELSE;
+	$$=ast;
+} | WHILE '(' Exp ')' DanglingStmt
+{
+	auto ast=new DanglingStmtAST;
+	ast->exp=node($3);
+	ast->stmt1=node($5);
+	ast->type=_WHILE;
 	$$=ast;
 };
 

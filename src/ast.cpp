@@ -244,7 +244,7 @@ Result MatchedStmtAST::print()const
 {
 	if(debug_flag)
 		out<<"MatchedStmt :\n";
-	if(type==_IF)
+	if(type==_IF_ELSE)
 	{
 		assert(exp.has_value());
 		solve_if_else(*exp,stmt1,stmt2);
@@ -311,15 +311,16 @@ Result MatchedStmtAST::print()const
 	}
 	return Result();
 }
-
 Result DanglingStmtAST::print()const
 {
 	if(debug_flag)
 		out<<"DanglingStmt :\n";
-	if(matched_stmt.has_value())
-		solve_if_else(exp,*matched_stmt,stmt);
-	else
-		solve_if(exp,stmt);
+	if(type==_IF)
+		solve_if(exp,stmt1);
+	if(type==_IF_ELSE)
+		solve_if_else(exp,stmt1,stmt2);
+	if(type==_WHILE)
+		solve_while(exp,stmt1);	
 	return Result();
 }
 
