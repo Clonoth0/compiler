@@ -390,7 +390,10 @@ Result VarDefAST::print()const
 			value=(*init)->print();
 		assert(value.imm);
 		symbol_insert(ident,now);
-		out<<"global "<<now<<" = alloc i32, "<<value<<"\n";
+		if(value.value)
+			out<<"global "<<now<<" = alloc i32, "<<value<<"\n";
+		else
+			out<<"global "<<now<<" = alloc i32, zeroinit\n";
 		return value;
 	}
 	else

@@ -1,13 +1,93 @@
-decl @getint(): i32
-decl @getch(): i32
-decl @getarray(*i32): i32
-decl @putint(i32)
-decl @putch(i32)
-decl @putarray(i32, *i32)
-decl @starttime()
-decl @stoptime()
-fun @main() : i32 {
-%entry_main:
-	ret 1
-}
+	.data
+	.global v0
+v0:
+	.word 10
 
+	.text
+	.global _1
+_1:
+	addi sp, sp, -16
+entry__1:
+	la t1, v0
+	lw t1, 0(t1)
+	sw t1, 0(sp)
+	lw t1, 0(sp)
+	li t2, 1
+	add t1, t1, t2
+	sw t1, 4(sp)
+	lw t1, 4(sp)
+	sw t1, 8(sp)
+	la t1, v0
+	lw t1, 0(t1)
+	sw t1, 12(sp)
+	lw a0, 12(sp)
+	addi sp, sp, 16
+	ret
+	.global _2
+_2:
+	addi sp, sp, -16
+	sw ra, 4(sp)
+entry__2:
+	la t1, v0
+	lw t1, 0(t1)
+	sw t1, 0(sp)
+	lw a0, 0(sp)
+	call putint
+	li a0, 10
+	call putch
+	li a0, 0
+	lw ra, 4(sp)
+	addi sp, sp, 16
+	ret
+	.global main
+main:
+	addi sp, sp, -48
+	sw ra, 40(sp)
+entry_main:
+	li t1, 0
+	sw t1, 0(sp)
+	j entry_0
+entry_0:
+	lw t1, 0(sp)
+	sw t1, 4(sp)
+	lw t1, 4(sp)
+	li t2, 10
+	slt t1, t1, t2
+	sw t1, 8(sp)
+	lw t1, 8(sp)
+	bnez t1, body_0
+	j while_end_0
+body_0:
+	call _1
+	sw a0, 12(sp)
+	li t1, 1
+	sw t1, 16(sp)
+	lw t1, 16(sp)
+	sw t1, 20(sp)
+	lw t1, 20(sp)
+	li t2, 2
+	add t1, t1, t2
+	sw t1, 24(sp)
+	lw t1, 24(sp)
+	sw t1, 16(sp)
+	lw t1, 16(sp)
+	sw t1, 28(sp)
+	lw a0, 28(sp)
+	call putint
+	li a0, 10
+	call putch
+	call _2
+	lw t1, 0(sp)
+	sw t1, 32(sp)
+	lw t1, 32(sp)
+	li t2, 1
+	add t1, t1, t2
+	sw t1, 36(sp)
+	lw t1, 36(sp)
+	sw t1, 0(sp)
+	j entry_0
+while_end_0:
+	li a0, 0
+	lw ra, 40(sp)
+	addi sp, sp, 48
+	ret

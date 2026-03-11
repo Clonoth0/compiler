@@ -65,6 +65,10 @@ static void _li(const string &rd,const int &imm)
 {
 	cout<<"\tli "<<rd<<", "<<imm<<"\n";
 }
+static void _la(const string &rd,const string &lable)
+{
+	cout<<"\tla "<<rd<<", "<<lable<<"\n";
+}
 static void _mv(const string &rd,const string &rs)
 {
 	cout<<"\tmv "<<rd<<", "<<rs<<"\n";
@@ -101,27 +105,56 @@ static void addi(const string &rd,const string &rs1,const int &imm)
 		_add(rd,rs1,"t0");
 	}
 }
-class Address
+class AddressTable
 {
 	private:
 		unordered_map<koopa_raw_value_t,int>f;
-		int t=0;
 	public:
-		int cnt=0;
+		int S,R,A,T,i;
 		int query(const koopa_raw_value_t &v)
 		{
 			auto p=f.find(v);
 			if(p!=f.end())
 				return p->second;
-			f[v]=t;
-			t+=4;
-			return t-4;
+			f[v]=i;
+			i+=4;
+			return i-4;
 		}
-}addr;
+		void init(int _R,int _S,int _A)
+		{
+			R=_R,S=_S,A=_A;
+			T=(S+R+A+15)/16*16;
+			i=A;
+			unordered_map<koopa_raw_value_t,int>().swap(f);
+		}
+};
+static AddressTable addr;
+static unordered_map<koopa_raw_value_t,int>args_table;
+static unordered_map<koopa_raw_value_t,string>global_table;
+static int global_total=0;
+static void load(const string &rd,const koopa_raw_value_t &value)
+{
+	if(value->kind.tag==KOOPA_RVT_INTEGER)
+		_li(rd,value->kind.data.integer.value);
+	else
+	{
+		auto p=args_table.find(value);
+		if(p==args_table.end())
+			_lw(rd,"sp",addr.query(value));
+		else
+		{
+			if(p->second<8)
+				_mv(rd,"a"+to_string(p->second));
+			else
+				_lw(rd,"sp",addr.T+(p->second-8)*4);
+		}
+	}
+}
 void visit(const koopa_raw_program_t &program)
 {
+	cout<<"\t.data\n";
 	visit(program.values);
-	cout<<".text\n";
+	cout<<"\n\t.text\n";
 	visit(program.funcs);
 }
 void visit(const koopa_raw_slice_t &slice)
@@ -147,23 +180,40 @@ void visit(const koopa_raw_slice_t &slice)
 }
 void visit(const koopa_raw_function_t &func)
 {
+	if(!func->bbs.len)
+		return;
 	cout<<"\t.global "<<func->name+1<<"\n";
 	cout<<func->name+1<<":\n";
-	int cnt=0;
+	int S=0,R=0,A=0;
 	for(size_t i=0;i<func->bbs.len;++i)
 	{
 		auto bb=reinterpret_cast<koopa_raw_basic_block_t>(func->bbs.buffer[i]);
-		cnt+=bb->insts.len;
+		S+=bb->insts.len;
 		for(size_t j=0;j<bb->insts.len;++j)
 		{
 			auto inst=reinterpret_cast<koopa_raw_value_t>(bb->insts.buffer[j]);
 			if(inst->ty->tag==KOOPA_RTT_UNIT)
-				--cnt;
+				--S;
+			if(inst->kind.tag==KOOPA_RVT_CALL)
+			{
+				R=4;
+				int len=inst->kind.data.call.args.len;
+				if(len-8>A)
+					A=len-8;
+			}
 		}
 	}
-	cnt=(cnt*4+15)/16*16;
-	addi("sp","sp",-cnt);
-	addr.cnt=cnt;
+	S*=4,A*=4;
+	addr.init(R,S,A);
+	unordered_map<koopa_raw_value_t,int>().swap(args_table);
+	addi("sp","sp",-addr.T);
+	if(R)
+		_sw("ra","sp",S+A);
+	for(int i=0;i<func->params.len;++i)
+	{
+		auto value=reinterpret_cast<koopa_raw_value_t>(func->params.buffer[i]);
+		args_table[value]=i;
+	}
 	visit(func->bbs);
 }
 void visit(const koopa_raw_basic_block_t &bb)
@@ -176,13 +226,13 @@ void visit(const koopa_raw_value_t &value)
 	const auto &kind=value->kind;
 	switch(kind.tag)
 	{
-		case KOOPA_RVT_RETURN:
-			visit(kind.data.ret);
-			break;
 		case KOOPA_RVT_INTEGER:
 			visit(kind.data.integer);
 			break;
 		case KOOPA_RVT_ALLOC:
+			break;
+		case KOOPA_RVT_GLOBAL_ALLOC:
+			visit(kind.data.global_alloc,value);
 			break;
 		case KOOPA_RVT_LOAD:
 			visit(kind.data.load,value);
@@ -199,51 +249,62 @@ void visit(const koopa_raw_value_t &value)
 		case KOOPA_RVT_JUMP:
 			visit(kind.data.jump);
 			break;
+		case KOOPA_RVT_CALL:
+			visit(kind.data.call,value);
+			break;
+		case KOOPA_RVT_RETURN:
+			visit(kind.data.ret);
+			break;
 		default:
 			assert(false);
 	}
-}
-void visit(const koopa_raw_return_t &i)
-{
-	if(i.value)
-	{
-		if(i.value->kind.tag==KOOPA_RVT_INTEGER)
-			_li("a0",i.value->kind.data.integer.value);
-		else
-			_lw("a0","sp",addr.query(i.value));
-	}
-	else
-		_li("a0",0);
-	addi("sp","sp",addr.cnt);
-	_ret();
 }
 void visit(const koopa_raw_integer_t &i)
 {
 	cout<<i.value;
 }
+void visit(const koopa_raw_global_alloc_t &i,const koopa_raw_value_t &value)
+{
+	string name="v"+to_string(global_total++);
+	cout<<"\t.global "<<name<<"\n";
+	cout<<name<<":\n";
+	if(i.init->kind.tag==KOOPA_RVT_INTEGER)
+		cout<<"\t.word "<<i.init->kind.data.integer.value<<"\n";
+	else
+	{
+		assert(i.init->kind.tag==KOOPA_RVT_ZERO_INIT);
+		cout<<"\t.zero 4\n";
+	}
+	global_table[value]=name;
+}
 void visit(const koopa_raw_load_t &i,const koopa_raw_value_t &value)
 {
-	_lw("t1","sp",addr.query(i.src));
+	auto p=global_table.find(i.src);
+	if(p!=global_table.end())
+	{
+		_la("t1",p->second);
+		_lw("t1","t1",0);
+	}
+	else
+		_lw("t1","sp",addr.query(i.src));
 	_sw("t1","sp",addr.query(value));
 }
 void visit(const koopa_raw_store_t &i)
 {
-	if(i.value->kind.tag==KOOPA_RVT_INTEGER)
-		_li("t1",i.value->kind.data.integer.value);
+	load("t1",i.value);
+	auto p=global_table.find(i.dest);
+	if(p!=global_table.end())
+	{
+		_la("t2",p->second);
+		_sw("t1","t2",0);
+	}
 	else
-		_lw("t1","sp",addr.query(i.value));
-	_sw("t1","sp",addr.query(i.dest));
+		_sw("t1","sp",addr.query(i.dest));
 }
 void visit(const koopa_raw_binary_t &i,const koopa_raw_value_t &value)
 {
-	if(i.lhs->kind.tag==KOOPA_RVT_INTEGER)
-		_li("t1",i.lhs->kind.data.integer.value);
-	else
-		_lw("t1","sp",addr.query(i.lhs));
-	if(i.rhs->kind.tag==KOOPA_RVT_INTEGER)
-		_li("t2",i.rhs->kind.data.integer.value);
-	else
-		_lw("t2","sp",addr.query(i.rhs));
+	load("t1",i.lhs);
+	load("t2",i.rhs);
 	const string now="t1",lhs="t1",rhs="t2";
 	switch(i.op)
 	{
@@ -297,16 +358,42 @@ void visit(const koopa_raw_binary_t &i,const koopa_raw_value_t &value)
 }
 void visit(const koopa_raw_branch_t &i)
 {
-	if(i.cond->kind.tag==KOOPA_RVT_INTEGER)
-		_li("t1",i.cond->kind.data.integer.value);
-	else
-		_lw("t1","sp",addr.query(i.cond));
+	load("t1",i.cond);
 	cout<<"\tbnez t1, "<<i.true_bb->name+1<<"\n";
 	cout<<"\tj "<<i.false_bb->name+1<<"\n";
 }
 void visit(const koopa_raw_jump_t &i)
 {
 	cout<<"\tj "<<i.target->name+1<<"\n";
+}
+void visit(const koopa_raw_call_t &i,const koopa_raw_value_t &value)
+{
+	int len=i.args.len;
+	for(int j=0;j<len;++j)
+	{
+		auto value=reinterpret_cast<koopa_raw_value_t>(i.args.buffer[j]);
+		if(j<8)
+			load("a"+to_string(j),value);
+		else
+		{
+			load("t1",value);
+			_sw("t1","sp",(j-8)*4);
+		}
+	}
+	cout<<"\tcall "<<i.callee->name+1<<"\n";
+	if(value->ty->tag!=KOOPA_RTT_UNIT)
+		_sw("a0","sp",addr.query(value));
+}
+void visit(const koopa_raw_return_t &i)
+{
+	if(i.value)
+		load("a0",i.value);
+	else
+		_li("a0",0);
+	if(addr.R)
+		_lw("ra","sp",addr.S+addr.A);
+	addi("sp","sp",addr.T);
+	_ret();
 }
 void solve_riscv(const char *str)
 {
