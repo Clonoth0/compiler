@@ -43,10 +43,10 @@ using namespace std;
 %type <str_val> LVal
 %type <vec_val> CompUnit ExConstDef ExVarDef ExBlockItem FuncFParams FuncRParams
 %type <ast_val> FuncDef FuncFParam
-%type <ast_val> Decl ConstDecl ConstDef ConstInitVal VarDecl VarDef InitVal
+%type <ast_val> Decl ConstDecl ConstDef VarDecl VarDef InitVal
 %type <ast_val> Block BlockItem
 %type <ast_val> Stmt MatchedStmt DanglingStmt
-%type <ast_val> Exp PrimaryExp UnaryExp MulExp AddExp RelExp EqExp AndExp OrExp ConstExp
+%type <ast_val> Exp PrimaryExp UnaryExp MulExp AddExp RelExp EqExp AndExp OrExp
 %type <int_val> Number
 
 %%
@@ -105,18 +105,11 @@ ExConstDef :
 	$$=defs;
 };
 
-ConstDef : IDENT '=' ConstInitVal
+ConstDef : IDENT '=' InitVal
 {
 	auto ast=new ConstDefAST;
 	ast->ident=*unique_ptr<string>($1);
 	ast->init=node($3);
-	$$=ast;
-};
-
-ConstInitVal : ConstExp
-{
-	auto ast=new ConstInitValAST;
-	ast->exp=node($1);
 	$$=ast;
 };
 
@@ -153,14 +146,12 @@ VarDef : IDENT
 	$$=ast;
 };
 
-InitVal : ConstExp
+InitVal : Exp
 {
 	auto ast=new InitValAST;
 	ast->exp=node($1);
 	$$=ast;
 };
-
-
 
 FuncDef : VOID IDENT '(' ')' Block 
 {
@@ -531,13 +522,6 @@ OrExp : AndExp
 	auto ast=new OrExpAST;
 	ast->value=make_pair(node($1),*unique_ptr<string>($2));
 	ast->and_exp=node($3);
-	$$=ast;
-};
-
-ConstExp : Exp
-{
-	auto ast=new ConstExpAST;
-	ast->exp=node($1);
 	$$=ast;
 };
 

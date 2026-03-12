@@ -353,21 +353,6 @@ Result ConstDefAST::print()const
 	symbol_insert(ident,Symbol(false,now.value));
 	return now;
 }
-Result ConstInitValAST::print()const
-{
-	if(debug_flag)
-		out<<"ConstInitVal :\n";
-	auto now=exp->print();
-	return now;
-}
-Result ConstExpAST::print()const
-{
-	if(debug_flag)
-		out<<"ConstExp :\n";
-	auto now=exp->print();
-	return now;
-}
-
 
 Result VarDeclAST::print()const
 {

@@ -168,18 +168,6 @@ class ConstDefAST:public BaseAST
 		node init;
 		Result print()const override;
 };
-class ConstInitValAST:public BaseAST
-{
-	public:
-		node exp;
-		Result print()const override;
-};
-class ConstExpAST:public BaseAST
-{
-	public:
-		node exp;
-		Result print()const override;
-};
 class VarDeclAST:public BaseAST
 {
 	public:
