@@ -40,13 +40,12 @@ using namespace std;
 %token <str_val> IDENT EQOP RELOP ADDOP NOTOP MULOP ANDOP OROP 
 %token <int_val> INT_CONST
 
-%type <str_val> LVal
 %type <vec_val> CompUnit ExConstDef ExVarDef ExBlockItem FuncFParams FuncRParams
 %type <ast_val> FuncDef FuncFParam
 %type <ast_val> Decl ConstDecl ConstDef VarDecl VarDef InitVal
 %type <ast_val> Block BlockItem
 %type <ast_val> Stmt MatchedStmt DanglingStmt
-%type <ast_val> Exp PrimaryExp UnaryExp MulExp AddExp RelExp EqExp AndExp OrExp
+%type <ast_val> Exp LVal PrimaryExp UnaryExp MulExp AddExp RelExp EqExp AndExp OrExp
 %type <int_val> Number
 
 %%
@@ -252,7 +251,7 @@ Stmt : MatchedStmt
 MatchedStmt : LVal '=' Exp ';'
 {
 	auto ast=new MatchedStmtAST;
-	ast->lval=*unique_ptr<string>($1);
+	ast->lval=node($1);
 	ast->exp=node($3);
 	ast->block=nullopt;
 	ast->type=_OTHER;
@@ -366,7 +365,10 @@ Exp : OrExp
 
 LVal : IDENT
 {
-	$$=$1;
+	auto ast=new LValAST;
+	ast->ident=*unique_ptr<string>($1);
+	ast->exps=make_unique<vector<node>>();
+	$$=ast;
 };
 
 PrimaryExp : '(' Exp ')'
@@ -380,7 +382,7 @@ PrimaryExp : '(' Exp ')'
 {
 	auto ast=new PrimaryExpAST;
 	ast->exp=node();
-	ast->lval=*unique_ptr<string>($1);
+	ast->lval=node($1);
 	ast->number=nullopt;
 	$$=ast;
 } | Number

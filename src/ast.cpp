@@ -3,7 +3,14 @@
 #include<unordered_map>
 #include<unordered_set>
 #include"include/ast.hpp"
-
+Result::Result(const Symbol &rhs)
+{
+	imm=rhs.addr,value=rhs.value;
+}
+Symbol::Symbol(const Result &rhs)
+{
+	addr=rhs.imm,value=rhs.value;
+}
 bool debug_flag=false;
 koopa_stream out;
 static int result_total=0,symbol_total=0;
@@ -279,7 +286,7 @@ Result MatchedStmtAST::print()const
 	if(lval.has_value())
 	{
 		assert(exp.has_value());
-		auto now=symbol_table[*lval];
+		auto now=Symbol((*lval)->print());
 		auto x=(*exp)->print();
 		_store(x,now);
 		return x;
@@ -410,6 +417,13 @@ Result ExpAST::print()const
 	auto x=exp->print();
 	return x;
 }
+Result LValAST::print()const
+{
+	if(debug_flag)
+		out<<"LVal :\n";
+	auto now=symbol_table[ident];
+	return Result(now);
+}
 Result UnaryExpAST::print()const
 {
 	if(debug_flag)
@@ -487,7 +501,7 @@ Result PrimaryExpAST::print()const
 	else
 		if(lval.has_value())
 		{
-			auto now=symbol_table[*lval];
+			auto now=Symbol((*lval)->print());
 			if(now.addr)
 				return _load(now); 
 			else

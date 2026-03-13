@@ -13,6 +13,8 @@ enum StmtType
 {
 	_IF,_IF_ELSE,_WHILE,_BREAK,_CONTINUE,_RETURN,_OTHER
 };
+class Result;
+class Symbol;
 class Result
 {
 	public:
@@ -20,6 +22,7 @@ class Result
 		int value;
 		Result(bool _imm=false,int _value=0):imm(_imm),value(_value){}
 		auto operator <=>(const Result &rhs)const=default;
+		Result(const Symbol &rhs);
 };
 class Symbol
 {
@@ -31,6 +34,8 @@ class Symbol
 		{
 			return "@_"+to_string(value);
 		}
+		auto operator <=>(const Symbol &rhs)const=default;
+		Symbol(const Result &rhs);
 };
 class koopa_stream
 {
@@ -135,7 +140,7 @@ class StmtAST:public BaseAST
 class MatchedStmtAST:public BaseAST
 {
 	public:
-		optional<string>lval;
+		optional<node>lval;
 		optional<node>exp,block;
 		node stmt1,stmt2;
 		StmtType type;
@@ -196,6 +201,13 @@ class ExpAST:public BaseAST
 		node exp;
 		Result print()const override;
 };
+class LValAST:public BaseAST
+{
+	public:
+		string ident;
+		unique_ptr<vector<node>>exps;
+		Result print()const override;
+};
 class UnaryExpAST:public BaseAST
 {
 	public:
@@ -209,7 +221,7 @@ class PrimaryExpAST:public BaseAST
 {
 	public:
 		node exp;
-		optional<string>lval;
+		optional<node>lval;
 		optional<int>number;
 		Result print()const override;
 };
