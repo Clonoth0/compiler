@@ -852,6 +852,7 @@ Result AddExpAST::print()const
 				out<<"\t"<<now<<" = add "<<x<<", "<<y<<"\n";
 			if(value->second=="-")
 				out<<"\t"<<now<<" = sub "<<x<<", "<<y<<"\n";
+			need_jump=true;
 			return now;
 		}
 	}
