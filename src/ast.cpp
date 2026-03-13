@@ -412,16 +412,8 @@ Result ConstDefAST::print()const
 		for(int i=size-2;~i;--i)
 			array_size[i]*=array_size[i+1];
 		array_init.clear();
-		// cerr<<"const init\n";
 		init->print();
 		int len=array_init.size();
-		if(!(array_size[0]==len))
-		{
-			cerr<<array_size[0]<<" "<<len<<"\n";
-			for(int i=0;i<len;++i)
-				cerr<<array_init[i].value<<" ";
-			cerr<<"\n";
-		}
 		assert(array_size[0]==len);
 		if(is_global)
 		{
@@ -581,7 +573,6 @@ Result InitValAST::print()const
 				array_init.push_back(now);
 			--init_ptr;
 		}
-		// cerr<<"init : "<<array_init.size()<<"\n";
 		while(array_init.empty()||array_init.size()%array_size[q])
 			array_init.push_back(Result(true,0));
 		return Result(false,-1);
@@ -606,10 +597,6 @@ Result LValAST::print()const
 	else
 	{
 		auto array_size=symbol_size[now];
-		// cerr<<"array "<<ident<<" : ";
-		// for(int i=0;i<(int)array_size.size();++i)
-		// 	cerr<<array_size[i]<<" ";
-		// cerr<<"\n";
 		int len=exps->size();
 		vector<Result>index(len);
 		for(int i=0;i<len;++i)
