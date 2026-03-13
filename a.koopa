@@ -6,113 +6,210 @@ decl @putch(i32)
 decl @putarray(i32, *i32)
 decl @starttime()
 decl @stoptime()
-global @_0 = alloc [i32, 1], zeroinit
-global @_1 = alloc [i32, 6], {5, 6, 7, 8, 0, 0}
-fun @main() : i32 {
-%entry_main:
-	@_2 = alloc [i32, 10]
-	@_3 = getelemptr @_2, 0
-	store 0, @_3
-	@_4 = getelemptr @_2, 1
-	store 0, @_4
-	@_5 = getelemptr @_2, 2
-	store 0, @_5
-	@_6 = getelemptr @_2, 3
-	store 0, @_6
-	@_7 = getelemptr @_2, 4
-	store 0, @_7
-	@_8 = getelemptr @_2, 5
-	store 0, @_8
-	@_9 = getelemptr @_2, 6
-	store 0, @_9
-	@_10 = getelemptr @_2, 7
-	store 0, @_10
-	@_11 = getelemptr @_2, 8
-	store 0, @_11
-	@_12 = getelemptr @_2, 9
-	store 0, @_12
-	@_13 = alloc [i32, 6]
-	@_14 = getelemptr @_13, 0
-	store 1, @_14
-	@_15 = getelemptr @_13, 1
-	store 2, @_15
-	@_16 = getelemptr @_13, 2
-	store 3, @_16
-	@_17 = getelemptr @_13, 3
-	store 4, @_17
-	@_18 = getelemptr @_13, 4
-	store 0, @_18
-	@_19 = getelemptr @_13, 5
-	store 0, @_19
-	@_20 = alloc i32
-	store 0, @_20
-	@_21 = alloc i32
-	store 0, @_21
+global %_0 = alloc i32, zeroinit
+fun %_1(%_2_: i32, %_3_: *i32) {
+%entry__1:
+	%_2 = alloc i32
+	store %_2_, %_2
+	%_3 = alloc *i32
+	store %_3_, %_3
+	%_4 = alloc i32
+	store 0, %_4
 	jump %entry_0
 %entry_0:
-	%0 = load @_21
-	%1 = lt %0, 2
-	br %1, %body_0, %while_end_0
+	%_5 = load %_4
+	%_6 = load %_2
+	%_7 = lt %_5, %_6
+	br %_7, %body_0, %while_end_0
 %body_0:
-	@_22 = alloc i32
-	store 0, @_22
-	jump %entry_1
-%entry_1:
-	%2 = load @_22
-	%3 = lt %2, 3
-	br %3, %body_1, %while_end_1
-%body_1:
-	%4 = load @_20
-	%5 = load @_21
-	%6 = mul %5, 3
-	%7 = load @_22
-	%8 = add %6, %7
-	@_23 = getelemptr @_13, %8
-	%9 = load @_23
-	%10 = add %4, %9
-	%11 = load @_21
-	%12 = mul %11, 3
-	%13 = load @_22
-	%14 = add %12, %13
-	@_24 = getelemptr @_1, %14
-	%15 = load @_24
-	%16 = add %10, %15
-	store %16, @_20
-	%17 = load @_22
-	%18 = add %17, 1
-	store %18, @_22
-	jump %entry_1
-%while_end_1:
-	%19 = load @_21
-	%20 = add %19, 1
-	store %20, @_21
+	%_8 = load %_4
+	%_9 = load %_3
+	%_10 = getptr %_9, %_8
+	%_11 = load %_0
+	store %_11, %_10
+	%_12 = load %_0
+	%_13 = add %_12, 1
+	store %_13, %_0
+	%_14 = load %_4
+	%_15 = add %_14, 1
+	store %_15, %_4
 	jump %entry_0
 %while_end_0:
-	store 0, @_21
+	ret
+}
+fun %_16(%_17_: i32, %_18_: *i32) {
+%entry__16:
+	%_17 = alloc i32
+	store %_17_, %_17
+	%_18 = alloc *i32
+	store %_18_, %_18
+	%_19 = alloc i32
+	store 0, %_19
+	jump %entry_1
+%entry_1:
+	%_20 = load %_19
+	%_21 = load %_17
+	%_22 = lt %_20, %_21
+	br %_22, %body_1, %while_end_1
+%body_1:
+	%_23 = load %_19
+	%_24 = load %_18
+	%_25 = getptr %_24, %_23
+	call %_1(10, %_25)
+	%_26 = load %_19
+	%_27 = add %_26, 1
+	store %_27, %_19
+	jump %entry_1
+%while_end_1:
+	ret
+}
+fun %_28(%_29_: i32, %_30_: *i32) {
+%entry__28:
+	%_29 = alloc i32
+	store %_29_, %_29
+	%_30 = alloc *i32
+	store %_30_, %_30
+	%_31 = alloc i32
+	store 0, %_31
 	jump %entry_2
 %entry_2:
-	%21 = load @_21
-	%22 = lt %21, 10
-	br %22, %body_2, %while_end_2
+	%_32 = load %_31
+	%_33 = load %_29
+	%_34 = lt %_32, %_33
+	br %_34, %body_2, %while_end_2
 %body_2:
-	%23 = load @_21
-	@_25 = getelemptr @_2, %23
-	%24 = load @_20
-	%25 = load @_21
-	%26 = add %24, %25
-	store %26, @_25
-	%27 = load @_21
-	@_26 = getelemptr @_0, %27
-	%28 = load @_20
-	%29 = load @_21
-	%30 = add %28, %29
-	store %30, @_26
-	%31 = load @_21
-	%32 = add %31, 1
-	store %32, @_21
+	%_35 = load %_31
+	%_36 = load %_30
+	%_37 = getptr %_36, %_35
+	call %_16(10, %_37)
+	%_38 = load %_31
+	%_39 = add %_38, 1
+	store %_39, %_31
 	jump %entry_2
 %while_end_2:
-	%33 = load @_20
-	ret %33
+	ret
+}
+fun %_40(%_41_: i32, %_42_: *i32) : i32 {
+%entry__40:
+	%_41 = alloc i32
+	store %_41_, %_41
+	%_42 = alloc *i32
+	store %_42_, %_42
+	%_43 = alloc i32
+	store 0, %_43
+	%_44 = alloc i32
+	store 0, %_44
+	jump %entry_3
+%entry_3:
+	%_45 = load %_43
+	%_46 = load %_41
+	%_47 = lt %_45, %_46
+	br %_47, %body_3, %while_end_3
+%body_3:
+	%_48 = load %_44
+	%_49 = load %_43
+	%_50 = load %_42
+	%_51 = getptr %_50, %_49
+	%_52 = load %_51
+	%_53 = add %_48, %_52
+	store %_53, %_44
+	%_54 = load %_43
+	%_55 = add %_54, 1
+	store %_55, %_43
+	jump %entry_3
+%while_end_3:
+	%_56 = load %_44
+	ret %_56
+}
+fun %_57(%_58_: i32, %_59_: *i32) : i32 {
+%entry__57:
+	%_58 = alloc i32
+	store %_58_, %_58
+	%_59 = alloc *i32
+	store %_59_, %_59
+	%_60 = alloc i32
+	store 0, %_60
+	%_61 = alloc i32
+	store 0, %_61
+	jump %entry_4
+%entry_4:
+	%_62 = load %_60
+	%_63 = load %_58
+	%_64 = lt %_62, %_63
+	br %_64, %body_4, %while_end_4
+%body_4:
+	%_65 = load %_61
+	%_66 = load %_60
+	%_67 = load %_59
+	%_68 = getptr %_67, %_66
+	%_69 = call %_40(10, %_68)
+	%_70 = add %_65, %_69
+	store %_70, %_61
+	%_71 = load %_60
+	%_72 = add %_71, 1
+	store %_72, %_60
+	jump %entry_4
+%while_end_4:
+	%_73 = load %_61
+	ret %_73
+}
+fun %_74(%_75_: i32, %_76_: *i32) : i32 {
+%entry__74:
+	%_75 = alloc i32
+	store %_75_, %_75
+	%_76 = alloc *i32
+	store %_76_, %_76
+	%_77 = alloc i32
+	store 0, %_77
+	%_78 = alloc i32
+	store 0, %_78
+	jump %entry_5
+%entry_5:
+	%_79 = load %_77
+	%_80 = load %_75
+	%_81 = lt %_79, %_80
+	br %_81, %body_5, %while_end_5
+%body_5:
+	%_82 = load %_78
+	%_83 = load %_77
+	%_84 = load %_76
+	%_85 = getptr %_84, %_83
+	%_86 = call %_57(10, %_85)
+	%_87 = add %_82, %_86
+	store %_87, %_78
+	%_88 = load %_77
+	%_89 = add %_88, 1
+	store %_89, %_77
+	jump %entry_5
+%while_end_5:
+	%_90 = load %_78
+	ret %_90
+}
+fun @main() : i32 {
+%entry_main:
+	%_91 = alloc [i32, 1000]
+	%_92 = getelemptr %_91, 0
+	call %_28(10, %_92)
+	%_93 = alloc i32
+	%_94 = getelemptr %_91, 0
+	%_95 = call %_74(10, %_94)
+	store %_95, %_93
+	%_96 = load %_93
+	%_97 = getelemptr %_91, 1
+	%_98 = call %_57(10, %_97)
+	%_99 = add %_96, %_98
+	store %_99, %_93
+	%_100 = load %_93
+	%_101 = mul 2, 100
+	%_102 = add %_101, 3
+	%_103 = getelemptr %_91, %_102
+	%_104 = call %_40(10, %_103)
+	%_105 = add %_100, %_104
+	store %_105, %_93
+	%_106 = load %_93
+	call @putint(%_106)
+	call @putch(10)
+	%_107 = load %_93
+	ret %_107
 }
 

@@ -232,6 +232,14 @@ FuncFParam : INT IDENT
 {
 	auto ast=new FuncFParamAST;
 	ast->ident=*unique_ptr<string>($2);
+	ast->ptr=false;
+	$$=ast;
+} | INT IDENT '[' ']' ExExp
+{
+	auto ast=new FuncFParamAST;
+	ast->ident=*unique_ptr<string>($2);
+	ast->exps=unique_ptr<vector<node>>($5);
+	ast->ptr=true;
 	$$=ast;
 };
 
@@ -316,6 +324,7 @@ MatchedStmt : LVal '=' Exp ';'
 	ast->exp=nullopt;
 	ast->block=nullopt;
 	ast->type=_RETURN;
+	$$=ast;
 } | RETURN Exp ';'
 {
 	auto ast=new MatchedStmtAST;

@@ -32,7 +32,7 @@ class Symbol
 		Symbol(bool _addr=false,int _value=0):addr(_addr),value(_value){}
 		operator string()const
 		{
-			return "@_"+to_string(value);
+			return "%_"+to_string(value);
 		}
 		auto operator <=>(const Symbol &rhs)const=default;
 		Symbol(const Result &rhs);
@@ -72,14 +72,14 @@ decl @stoptime()
 		koopa_stream &operator <<(const Result &rhs)
 		{
 			if(!rhs.imm)
-				value+="%";
+				value+="%_";
 			value+=to_string(rhs.value);
 			return *this;
 		}
 		koopa_stream &operator <<(const Symbol &rhs)
 		{
 			assert(rhs.addr);
-			value+="@_"+to_string(rhs.value);
+			value+="%_"+to_string(rhs.value);
 			return *this;
 		}
 		const char *c_str()
@@ -122,6 +122,8 @@ class FuncFParamAST:public BaseAST
 {
 	public:
 		string ident;
+		unique_ptr<vector<node>>exps;
+		bool ptr;
 		Result print()const override;
 };
 class BlockAST:public BaseAST

@@ -1,21 +1,23 @@
 #include<cassert>
 #include<map>
+#include<set>
 #include<unordered_map>
 #include<unordered_set>
 #include"include/ast.hpp"
 Result::Result(const Symbol &rhs)
 {
-	imm=rhs.addr,value=rhs.value;
+	imm=!rhs.addr,value=rhs.value;
 }
 Symbol::Symbol(const Result &rhs)
 {
-	addr=rhs.imm,value=rhs.value;
+	addr=!rhs.imm,value=rhs.value;
 }
 bool debug_flag=false;
 koopa_stream out;
-static int result_total=0,symbol_total=0;
+static int _total=0;
 static unordered_map<string,Symbol>symbol_table;
 static map<Symbol,vector<int>>symbol_size;
+static set<Symbol>ptr_value;
 static unordered_map<string,bool>func_table={{"main",true},{"getint",true},{"getch",true},{"getarray",true},{"putint",false},{"putch",false},{"putarray",false},{"starttime",false},{"stoptime",false}}; // int : true, void : false
 static vector<vector<pair<string,optional<Symbol>>>>symbol_stack;
 static unordered_set<string>builtin_funcs={"main","getint","getch","getarray","putint","putch","putarray","starttime","stoptime"};
@@ -23,6 +25,8 @@ static int if_total=0,while_total=0,ex_total=0; // basic block
 static bool need_jump=false,need_ex=false;
 static vector<int>while_stack;
 static bool first_block,is_global;
+static vector<int>array_size;
+static vector<Result>array_init;
 static void symbol_insert(const string &ident,const Symbol &symbol)
 {
 	assert(!symbol_stack.empty());
@@ -63,7 +67,7 @@ static void check_ex()
 static Symbol _alloc()
 {
 	check_ex();
-	Symbol symbol(true,symbol_total++);
+	Symbol symbol(true,_total++);
 	out<<"\t"<<symbol<<" = alloc i32\n";
 	need_jump=true;
 	return symbol;
@@ -71,7 +75,7 @@ static Symbol _alloc()
 static Symbol _alloc(const int &size)
 {
 	check_ex();
-	Symbol symbol(true,symbol_total++);
+	Symbol symbol(true,_total++);
 	out<<"\t"<<symbol<<" = alloc [i32, "<<size<<"]\n";
 	need_jump=true;
 	return symbol;
@@ -79,8 +83,16 @@ static Symbol _alloc(const int &size)
 static Symbol _getelemptr(const Symbol &array,const Result &index)
 {
 	check_ex();
-	Symbol symbol(true,symbol_total++);
+	Symbol symbol(true,_total++);
 	out<<"\t"<<symbol<<" = getelemptr "<<array<<", "<<index<<"\n";
+	need_jump=true;
+	return symbol;
+}
+static Symbol _getptr(const Symbol &ptr,const Result &index)
+{
+	check_ex();
+	Symbol symbol(true,_total++);
+	out<<"\t"<<symbol<<" = getptr "<<ptr<<", "<<index<<"\n";
 	need_jump=true;
 	return symbol;
 }
@@ -88,7 +100,7 @@ static Result _load(const Symbol &symbol)
 {
 	assert(symbol.addr);
 	check_ex();
-	Result result(false,result_total++);
+	Result result(false,_total++);
 	out<<"\t"<<result<<" = load "<<symbol<<"\n";
 	need_jump=true;
 	return result;
@@ -103,7 +115,7 @@ static void _store(const Result &result,const Symbol &symbol)
 static Result _add(const Result &lhs,const Result &rhs)
 {
 	check_ex();
-	Result now(false,result_total++);
+	Result now(false,_total++);
 	out<<"\t"<<now<<" = add "<<lhs<<", "<<rhs<<"\n";
 	need_jump=true;
 	return now;
@@ -111,7 +123,7 @@ static Result _add(const Result &lhs,const Result &rhs)
 static Result _mul(const Result &lhs,const Result &rhs)
 {
 	check_ex();
-	Result now(false,result_total++);
+	Result now(false,_total++);
 	out<<"\t"<<now<<" = mul "<<lhs<<", "<<rhs<<"\n";
 	need_jump=true;
 	return now;
@@ -197,7 +209,7 @@ Result ProgramAST::print()const
 	}
 	return Result();
 }
-static vector<Symbol>def_params;
+static vector<pair<Symbol,bool>>def_params; // ptr : true, value : false
 Result FuncDefAST::print()const
 {
 	if(debug_flag)
@@ -213,7 +225,7 @@ Result FuncDefAST::print()const
 		str="@"+ident;
 	else
 	{
-		Symbol now(true,symbol_total++);
+		Symbol now(true,_total++);
 		symbol_table[ident]=now;
 		str=now;
 	}
@@ -231,6 +243,7 @@ Result FuncDefAST::print()const
 	str.erase(str.begin());
 	add_basic_block("%entry_"+str);
 	first_block=true;
+	cerr<<"block : \n";
 	block->print();
 	if(need_jump)
 	{
@@ -244,10 +257,36 @@ Result FuncFParamAST::print()const
 {
 	if(debug_flag)
 		out<<"FuncFParam :\n";
-	Symbol now(true,symbol_total++);
-	def_params.push_back(now);
-	out<<now<<"_: i32";
+	Symbol now(true,_total++);
 	symbol_insert(ident,now);
+	if(ptr)
+	{
+		def_params.emplace_back(now,true);
+		int size=exps->size();
+		array_size.resize(size);
+		for(int i=0;i<size;++i)
+		{
+			auto now=(*exps)[i]->print();
+			assert(now.imm);
+			array_size[i]=now.value;
+		}
+		array_size.insert(array_size.begin(),1);
+		++size;
+		for(int i=size-2;~i;--i)
+			array_size[i]*=array_size[i+1];
+		// cerr<<"array_size : ";
+		// for(int i=0;i<size;++i)
+		// 	cerr<<array_size[i]<<" \n";
+		// cerr<<"\n";
+		symbol_size[now]=array_size;
+		ptr_value.insert(now);
+		out<<now<<"_: *i32";
+	}
+	else
+	{
+		def_params.emplace_back(now,false);
+		out<<now<<"_: i32";
+	}
 	return Result();
 }
 Result BlockAST::print()const
@@ -258,9 +297,12 @@ Result BlockAST::print()const
 		symbol_stack.push_back({});
 	else
 	{
-		for(const auto &now:def_params)
+		for(const auto &[now,flag]:def_params)
 		{
-			out<<"\t"<<now<<" = alloc i32\n";
+			if(!flag)
+				out<<"\t"<<now<<" = alloc i32\n";
+			else
+				out<<"\t"<<now<<" = alloc *i32\n";
 			out<<"\tstore "<<now<<"_, "<<now<<"\n";
 		}
 		first_block=false;
@@ -268,6 +310,7 @@ Result BlockAST::print()const
 	Result now;
 	for(const auto &block:*blocks)
 		now=block->print();
+	assert(symbol_stack.size());
 	for(const auto &[ident,symbol]:symbol_stack.back())
 		symbol_reset(ident,symbol);
 	symbol_stack.pop_back();
@@ -328,6 +371,7 @@ Result MatchedStmtAST::print()const
 	}
 	if(type==_RETURN)
 	{
+		cerr<<"return\n";
 		check_ex();
 		if(exp.has_value())
 		{
@@ -387,8 +431,6 @@ Result ConstDeclAST::print()const
 		now=def->print();
 	return now;
 }
-static vector<int>array_size;
-static vector<Result>array_init;
 Result ConstDefAST::print()const
 {
 	if(debug_flag)
@@ -417,7 +459,7 @@ Result ConstDefAST::print()const
 		assert(array_size[0]==len);
 		if(is_global)
 		{
-			Symbol now(true,symbol_total++);
+			Symbol now(true,_total++);
 			symbol_insert(ident,now);
 			symbol_size[now]=array_size;
 			out<<"global "<<now<<" = alloc [i32, "<<len<<"], {";
@@ -437,6 +479,7 @@ Result ConstDefAST::print()const
 			for(int i=0;i<len;++i)
 			{
 				auto v=_getelemptr(now,Result(true,i));
+				ptr_value.insert(v);
 				_store(array_init[i],v);
 			}
 		}
@@ -461,16 +504,16 @@ Result VarDefAST::print()const
 	{
 		if(is_global)
 		{
-			Symbol now(true,symbol_total++);
+			Symbol now(true,_total++);
 			Result value(true,0);
 			if(init.has_value())
 				value=(*init)->print();
 			assert(value.imm);
 			symbol_insert(ident,now);
 			if(value.value)
-			out<<"global "<<now<<" = alloc i32, "<<value<<"\n";
+				out<<"global "<<now<<" = alloc i32, "<<value<<"\n";
 			else
-			out<<"global "<<now<<" = alloc i32, zeroinit\n";
+				out<<"global "<<now<<" = alloc i32, zeroinit\n";
 			return value;
 		}
 		else
@@ -512,19 +555,18 @@ Result VarDefAST::print()const
 		{
 			if(is_global)
 			{
-				Symbol now(true,symbol_total++);
+				Symbol now(true,_total++);
 				symbol_insert(ident,now);
 				symbol_size[now]=array_size;
-				out<<"global "<<now<<" = alloc [i32, "<<size<<"], zeroinit\n";
+				out<<"global "<<now<<" = alloc [i32, "<<array_size[0]<<"], zeroinit\n";
 				return Result();
 			}
-			array_init.assign(array_size[0],Result(true,0));
+			cerr<<"empty\n";
 		}
 		int len=array_init.size();
-		assert(array_size[0]==len);
 		if(is_global)
 		{
-			Symbol now(true,symbol_total++);
+			Symbol now(true,_total++);
 			symbol_insert(ident,now);
 			symbol_size[now]=array_size;
 			out<<"global "<<now<<" = alloc [i32, "<<len<<"], {";
@@ -538,12 +580,13 @@ Result VarDefAST::print()const
 		}
 		else
 		{
-			auto now=_alloc(len);
+			auto now=_alloc(array_size[0]);
 			symbol_insert(ident,now);
 			symbol_size[now]=array_size;
 			for(int i=0;i<len;++i)
 			{
 				auto v=_getelemptr(now,Result(true,i));
+				ptr_value.insert(v);
 				_store(array_init[i],v);
 			}
 		}
@@ -587,13 +630,33 @@ Result ExpAST::print()const
 	auto x=exp->print();
 	return x;
 }
+static bool lval_ptr;
 Result LValAST::print()const
 {
 	if(debug_flag)
 		out<<"LVal :\n";
 	auto now=symbol_table[ident];
 	if(exps->empty())
-		return Result(now);
+	{
+		if(symbol_size.count(now))
+		{
+			lval_ptr=true;
+			if(ptr_value.count(now))
+			{
+				Symbol tmp(true,_total++);
+				out<<"\t"<<tmp<<" = load "<<now<<"\n";
+				ptr_value.insert(tmp);
+				return tmp;
+			}
+			else
+				return Result(now);
+		}
+		else
+		{
+			lval_ptr=false;
+			return Result(now);
+		}
+	}
 	else
 	{
 		auto array_size=symbol_size[now];
@@ -602,13 +665,28 @@ Result LValAST::print()const
 		for(int i=0;i<len;++i)
 		{
 			index[i]=(*exps)[i]->print();
-			if(i+1<len)
+			if(i+1<(int)array_size.size())
 				index[i]=_mul(index[i],Result(true,array_size[i+1]));
 		}
-		auto ptr=index[0];
+		auto pos=index[0];
 		for(int i=1;i<len;++i)
-			ptr=_add(ptr,index[i]);
-		return Result(_getelemptr(now,ptr));
+			pos=_add(pos,index[i]);
+		lval_ptr=len<array_size.size();
+		if(ptr_value.count(now))
+		{
+			Symbol tmp(true,_total++);
+			out<<"\t"<<tmp<<" = load "<<now<<"\n";
+			ptr_value.insert(tmp);
+			auto q=_getptr(tmp,pos);
+			ptr_value.insert(q);
+			return q;
+		}
+		else
+		{
+			auto tmp=_getelemptr(now,pos);
+			ptr_value.insert(tmp);
+			return Result(tmp);
+		}
 	}
 }
 Result UnaryExpAST::print()const
@@ -629,7 +707,7 @@ Result UnaryExpAST::print()const
 			result[i]=(*params)[i]->print();
 		if(func_table[*op])
 		{
-			Result now(false,result_total++);
+			Result now(false,_total++);
 			out<<"\t"<<now<<" = call "<<str<<"(";
 			for(int i=0;i<size;++i)
 			{
@@ -665,7 +743,7 @@ Result UnaryExpAST::print()const
 			return x;
 		else
 		{
-			Result now(false,result_total++);
+			Result now(false,_total++);
 			check_ex();
 			if(op.value()=="!")
 				out<<"\t"<<now<<" = eq "<<x<<", 0\n";
@@ -690,7 +768,21 @@ Result PrimaryExpAST::print()const
 		{
 			auto now=Symbol((*lval)->print());
 			if(now.addr)
-				return _load(now); 
+			{
+				if(lval_ptr)
+				{
+					if(!ptr_value.count(now))
+					{
+						auto tmp=_getelemptr(now,Result(true,0));
+						ptr_value.insert(tmp);
+						return tmp;
+					}
+					else
+						return now;
+				}
+				else
+					return _load(now); 
+			}
 			else
 				return Result(true,now.value);
 		}
@@ -720,7 +812,7 @@ Result MulExpAST::print()const
 		}
 		else
 		{
-			Result now(false,result_total++);
+			Result now(false,_total++);
 			check_ex();
 			if(value->second=="*")
 				out<<"\t"<<now<<" = mul "<<x<<", "<<y<<"\n";
@@ -754,7 +846,7 @@ Result AddExpAST::print()const
 		}
 		else
 		{
-			Result now(false,result_total++);
+			Result now(false,_total++);
 			check_ex();
 			if(value->second=="+")
 				out<<"\t"<<now<<" = add "<<x<<", "<<y<<"\n";
@@ -789,7 +881,7 @@ Result RelExpAST::print()const
 		}
 		else
 		{
-			Result now(false,result_total++);
+			Result now(false,_total++);
 			check_ex();
 			if(value->second=="<")
 				out<<"\t"<<now<<" = lt "<<x<<", "<<y<<"\n";
@@ -798,7 +890,7 @@ Result RelExpAST::print()const
 			if(value->second=="<=")
 				out<<"\t"<<now<<" = le "<<x<<", "<<y<<"\n";
 			if(value->second==">=")
-				out<<"\t"<<now<<" = gt "<<x<<", "<<y<<"\n";
+				out<<"\t"<<now<<" = ge "<<x<<", "<<y<<"\n";
 			need_jump=true;
 			return now;
 		}
@@ -825,7 +917,7 @@ Result EqExpAST::print()const
 		}
 		else
 		{
-			Result now(false,result_total++);
+			Result now(false,_total++);
 			check_ex();
 			if(value->second=="==")
 				out<<"\t"<<now<<" = eq "<<x<<", "<<y<<"\n";
@@ -852,7 +944,7 @@ Result AndExpAST::print()const
 			else
 			{
 				auto y=eq_exp->print();
-				Result v(false,result_total++);
+				Result v(false,_total++);
 				out<<"\t"<<v<<" = ne "<<y<<", 0\n";
 				return v;
 			}
@@ -870,7 +962,7 @@ Result AndExpAST::print()const
 				_store(Result(true,(bool)y.value),p);
 			else
 			{
-				Result v(false,result_total++);
+				Result v(false,_total++);
 				out<<"\t"<<v<<" = ne "<<y<<", 0\n";
 				_store(v,p);
 			}
@@ -899,7 +991,7 @@ Result OrExpAST::print()const
 			else
 			{
 				auto y=and_exp->print();
-				Result v(false,result_total++);
+				Result v(false,_total++);
 				out<<"\t"<<v<<" = ne "<<y<<", 0\n";
 				return v;
 			}
@@ -921,7 +1013,7 @@ Result OrExpAST::print()const
 				_store(Result(true,(bool)y.value),p);
 			else
 			{
-				Result v(false,result_total++);
+				Result v(false,_total++);
 				out<<"\t"<<v<<" = ne "<<y<<", 0\n";
 				_store(v,p);
 			}
