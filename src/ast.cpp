@@ -15,6 +15,7 @@ bool debug_flag=false;
 koopa_stream out;
 static int result_total=0,symbol_total=0;
 static unordered_map<string,Symbol>symbol_table;
+static map<Symbol,vector<int>>symbol_size;
 static unordered_map<string,bool>func_table={{"main",true},{"getint",true},{"getch",true},{"getarray",true},{"putint",false},{"putch",false},{"putarray",false},{"starttime",false},{"stoptime",false}}; // int : true, void : false
 static vector<vector<pair<string,optional<Symbol>>>>symbol_stack;
 static unordered_set<string>builtin_funcs={"main","getint","getch","getarray","putint","putch","putarray","starttime","stoptime"};
@@ -67,6 +68,22 @@ static Symbol _alloc()
 	need_jump=true;
 	return symbol;
 }
+static Symbol _alloc(const int &size)
+{
+	check_ex();
+	Symbol symbol(true,symbol_total++);
+	out<<"\t"<<symbol<<" = alloc [i32, "<<size<<"]\n";
+	need_jump=true;
+	return symbol;
+}
+static Symbol _getelemptr(const Symbol &array,const Result &index)
+{
+	check_ex();
+	Symbol symbol(true,symbol_total++);
+	out<<"\t"<<symbol<<" = getelemptr "<<array<<", "<<index<<"\n";
+	need_jump=true;
+	return symbol;
+}
 static Result _load(const Symbol &symbol)
 {
 	assert(symbol.addr);
@@ -79,7 +96,25 @@ static Result _load(const Symbol &symbol)
 static void _store(const Result &result,const Symbol &symbol)
 {
 	assert(symbol.addr);
+	check_ex();
 	out<<"\t"<<"store "<<result<<", "<<symbol<<"\n";
+	need_jump=true;
+}
+static Result _add(const Result &lhs,const Result &rhs)
+{
+	check_ex();
+	Result now(false,result_total++);
+	out<<"\t"<<now<<" = add "<<lhs<<", "<<rhs<<"\n";
+	need_jump=true;
+	return now;
+}
+static Result _mul(const Result &lhs,const Result &rhs)
+{
+	check_ex();
+	Result now(false,result_total++);
+	out<<"\t"<<now<<" = mul "<<lhs<<", "<<rhs<<"\n";
+	need_jump=true;
+	return now;
 }
 static string _if_then(const int &x)
 {
@@ -352,13 +387,69 @@ Result ConstDeclAST::print()const
 		now=def->print();
 	return now;
 }
+static vector<int>array_size;
+static vector<Result>array_init;
 Result ConstDefAST::print()const
 {
 	if(debug_flag)
 		out<<"ConstDef :\n";
-	auto now=init->print();
-	symbol_insert(ident,Symbol(false,now.value));
-	return now;
+	if(exps->empty())
+	{
+		auto now=init->print();
+		symbol_insert(ident,Symbol(false,now.value));
+		return Result();
+	}
+	else
+	{
+		int size=exps->size();
+		array_size.resize(size);
+		for(int i=0;i<size;++i)
+		{
+			auto now=(*exps)[i]->print();
+			assert(now.imm);
+			array_size[i]=now.value;
+		}
+		for(int i=size-2;~i;--i)
+			array_size[i]*=array_size[i+1];
+		array_init.clear();
+		// cerr<<"const init\n";
+		init->print();
+		int len=array_init.size();
+		if(!(array_size[0]==len))
+		{
+			cerr<<array_size[0]<<" "<<len<<"\n";
+			for(int i=0;i<len;++i)
+				cerr<<array_init[i].value<<" ";
+			cerr<<"\n";
+		}
+		assert(array_size[0]==len);
+		if(is_global)
+		{
+			Symbol now(true,symbol_total++);
+			symbol_insert(ident,now);
+			symbol_size[now]=array_size;
+			out<<"global "<<now<<" = alloc [i32, "<<len<<"], {";
+			for(int i=0;i<len;++i)
+			{
+				if(i)
+					out<<", ";
+				out<<array_init[i];
+			}
+			out<<"}\n";
+		}
+		else
+		{
+			auto now=_alloc(len);
+			symbol_insert(ident,now);
+			symbol_size[now]=array_size;
+			for(int i=0;i<len;++i)
+			{
+				auto v=_getelemptr(now,Result(true,i));
+				_store(array_init[i],v);
+			}
+		}
+		return Result();
+	}
 }
 
 Result VarDeclAST::print()const
@@ -374,39 +465,127 @@ Result VarDefAST::print()const
 {
 	if(debug_flag)
 		out<<"VarDef :\n";
-	if(is_global)
+	if(exps->empty())
 	{
-		Symbol now(true,symbol_total++);
-		Result value(true,0);
-		if(init.has_value())
-			value=(*init)->print();
-		assert(value.imm);
-		symbol_insert(ident,now);
-		if(value.value)
+		if(is_global)
+		{
+			Symbol now(true,symbol_total++);
+			Result value(true,0);
+			if(init.has_value())
+				value=(*init)->print();
+			assert(value.imm);
+			symbol_insert(ident,now);
+			if(value.value)
 			out<<"global "<<now<<" = alloc i32, "<<value<<"\n";
-		else
+			else
 			out<<"global "<<now<<" = alloc i32, zeroinit\n";
-		return value;
+			return value;
+		}
+		else
+		{
+			auto now=_alloc();
+			Result value;
+			if(init.has_value())
+			{
+				value=(*init)->print();
+				_store(value,now);
+			}
+			symbol_insert(ident,now);
+			return value;
+		}
 	}
 	else
 	{
-		auto now=_alloc();
-		Result value;
-		if(init.has_value())
+		int size=exps->size();
+		array_size.resize(size);
+		for(int i=0;i<size;++i)
 		{
-			value=(*init)->print();
-			_store(value,now);
+			auto now=(*exps)[i]->print();
+			assert(now.imm);
+			array_size[i]=now.value;
 		}
-		symbol_insert(ident,now);
-		return value;
+		if(debug_flag)
+		{
+			out<<"array_size : ";
+			for(int i=0;i<size;++i)
+				out<<array_size[i]<<" ";
+			out<<"\n";
+		}
+		for(int i=size-2;~i;--i)
+			array_size[i]*=array_size[i+1];
+		array_init.clear();
+		if(init.has_value())
+			(*init)->print();
+		if(array_init.empty())
+		{
+			if(is_global)
+			{
+				Symbol now(true,symbol_total++);
+				symbol_insert(ident,now);
+				symbol_size[now]=array_size;
+				out<<"global "<<now<<" = alloc [i32, "<<size<<"], zeroinit\n";
+				return Result();
+			}
+			array_init.assign(array_size[0],Result(true,0));
+		}
+		int len=array_init.size();
+		assert(array_size[0]==len);
+		if(is_global)
+		{
+			Symbol now(true,symbol_total++);
+			symbol_insert(ident,now);
+			symbol_size[now]=array_size;
+			out<<"global "<<now<<" = alloc [i32, "<<len<<"], {";
+			for(int i=0;i<len;++i)
+			{
+				if(i)
+					out<<", ";
+				out<<array_init[i];
+			}
+			out<<"}\n";
+		}
+		else
+		{
+			auto now=_alloc(len);
+			symbol_insert(ident,now);
+			symbol_size[now]=array_size;
+			for(int i=0;i<len;++i)
+			{
+				auto v=_getelemptr(now,Result(true,i));
+				_store(array_init[i],v);
+			}
+		}
+		return Result();
 	}
 }
+static int init_ptr=0;
 Result InitValAST::print()const
 {
 	if(debug_flag)
 		out<<"InitVal :\n";
-	auto now=exp->print();
-	return now;
+	if(exp.has_value())
+	{
+		auto now=(*exp)->print();
+		return now;
+	}
+	else
+	{
+		int q=array_size.size()-1;
+		while(q>init_ptr&&!(array_init.size()%array_size[q-1]))
+			--q;
+		for(const auto &init:*inits)
+		{
+			++init_ptr;
+			auto now=init->print();
+			if(now.imm||~now.value)
+				array_init.push_back(now);
+			--init_ptr;
+		}
+		// cerr<<"init : "<<array_init.size()<<"\n";
+		while(array_init.empty()||array_init.size()%array_size[q])
+			array_init.push_back(Result(true,0));
+		return Result(false,-1);
+	}
 }
 
 
@@ -422,7 +601,28 @@ Result LValAST::print()const
 	if(debug_flag)
 		out<<"LVal :\n";
 	auto now=symbol_table[ident];
-	return Result(now);
+	if(exps->empty())
+		return Result(now);
+	else
+	{
+		auto array_size=symbol_size[now];
+		// cerr<<"array "<<ident<<" : ";
+		// for(int i=0;i<(int)array_size.size();++i)
+		// 	cerr<<array_size[i]<<" ";
+		// cerr<<"\n";
+		int len=exps->size();
+		vector<Result>index(len);
+		for(int i=0;i<len;++i)
+		{
+			index[i]=(*exps)[i]->print();
+			if(i+1<len)
+				index[i]=_mul(index[i],Result(true,array_size[i+1]));
+		}
+		auto ptr=index[0];
+		for(int i=1;i<len;++i)
+			ptr=_add(ptr,index[i]);
+		return Result(_getelemptr(now,ptr));
+	}
 }
 Result UnaryExpAST::print()const
 {

@@ -41,6 +41,7 @@ using namespace std;
 %token <int_val> INT_CONST
 
 %type <vec_val> CompUnit ExConstDef ExVarDef ExBlockItem FuncFParams FuncRParams
+%type <vec_val> ExExp ExInitVal
 %type <ast_val> FuncDef FuncFParam
 %type <ast_val> Decl ConstDecl ConstDef VarDecl VarDef InitVal
 %type <ast_val> Block BlockItem
@@ -104,11 +105,12 @@ ExConstDef :
 	$$=defs;
 };
 
-ConstDef : IDENT '=' InitVal
+ConstDef : IDENT ExExp '=' InitVal
 {
 	auto ast=new ConstDefAST;
 	ast->ident=*unique_ptr<string>($1);
-	ast->init=node($3);
+	ast->exps=unique_ptr<vector<node>>($2);
+	ast->init=node($4);
 	$$=ast;
 };
 
@@ -122,26 +124,28 @@ VarDecl : INT VarDef ExVarDef ';'
 
 ExVarDef : 
 {
-	auto vec=new vector<node>;
-	$$=vec;
+	auto defs=new vector<node>;
+	$$=defs;
 } | ExVarDef ',' VarDef
 {
-	auto vec=$1;
-	vec->push_back(node($3));
-	$$=vec;
+	auto defs=$1;
+	defs->push_back(node($3));
+	$$=defs;
 };
 
-VarDef : IDENT
+VarDef : IDENT ExExp
 {
 	auto ast=new VarDefAST;
 	ast->ident=*unique_ptr<string>($1);
+	ast->exps=unique_ptr<vector<node>>($2);
 	ast->init=nullopt;
 	$$=ast;
-} | IDENT '=' InitVal
+} | IDENT ExExp '=' InitVal
 {
 	auto ast=new VarDefAST;
 	ast->ident=*unique_ptr<string>($1);
-	ast->init=node($3);
+	ast->exps=unique_ptr<vector<node>>($2);
+	ast->init=node($4);
 	$$=ast;
 };
 
@@ -149,7 +153,32 @@ InitVal : Exp
 {
 	auto ast=new InitValAST;
 	ast->exp=node($1);
+	ast->inits=make_unique<vector<node>>();
 	$$=ast;
+} | '{' '}'
+{
+	auto ast=new InitValAST;
+	ast->exp=nullopt;
+	ast->inits=make_unique<vector<node>>();
+	$$=ast;
+} | '{' InitVal ExInitVal '}'
+{
+	auto ast=new InitValAST;
+	ast->exp=nullopt;
+	ast->inits=unique_ptr<vector<node>>($3);
+	ast->inits->insert(ast->inits->begin(),node($2));
+	$$=ast;
+}
+
+ExInitVal : 
+{
+	auto inits=new vector<node>;
+	$$=inits;
+} | ExInitVal ',' InitVal
+{
+	auto inits=$1;
+	inits->push_back(node($3));
+	$$=inits;
 };
 
 FuncDef : VOID IDENT '(' ')' Block 
@@ -363,12 +392,23 @@ Exp : OrExp
 	$$=ast;
 };
 
-LVal : IDENT
+LVal : IDENT ExExp
 {
 	auto ast=new LValAST;
 	ast->ident=*unique_ptr<string>($1);
-	ast->exps=make_unique<vector<node>>();
+	ast->exps=unique_ptr<vector<node>>($2);
 	$$=ast;
+};
+
+ExExp : 
+{
+	auto exps=new vector<node>;
+	$$=exps;
+} | ExExp '[' Exp ']'
+{
+	auto exps=$1;
+	exps->push_back(node($3));
+	$$=exps;
 };
 
 PrimaryExp : '(' Exp ')'

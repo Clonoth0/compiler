@@ -59,6 +59,11 @@ decl @stoptime()
 			value+=rhs;
 			return *this;
 		}
+		koopa_stream &operator <<(const int &rhs)
+		{
+			value+=to_string(rhs);
+			return *this;
+		}
 		koopa_stream &operator <<(const string &rhs)
 		{
 			value+=rhs;
@@ -170,6 +175,7 @@ class ConstDefAST:public BaseAST
 {
 	public:
 		string ident;
+		unique_ptr<vector<node>>exps;
 		node init;
 		Result print()const override;
 };
@@ -183,13 +189,15 @@ class VarDefAST:public BaseAST
 {
 	public:
 		string ident;
+		unique_ptr<vector<node>>exps;
 		optional<node>init;
 		Result print()const override;
 };
 class InitValAST:public BaseAST
 {
 	public:
-		node exp;
+		optional<node>exp;
+		unique_ptr<vector<node>>inits;
 		Result print()const override;
 };
 

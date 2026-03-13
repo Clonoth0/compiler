@@ -1,0 +1,118 @@
+decl @getint(): i32
+decl @getch(): i32
+decl @getarray(*i32): i32
+decl @putint(i32)
+decl @putch(i32)
+decl @putarray(i32, *i32)
+decl @starttime()
+decl @stoptime()
+global @_0 = alloc [i32, 1], zeroinit
+global @_1 = alloc [i32, 6], {5, 6, 7, 8, 0, 0}
+fun @main() : i32 {
+%entry_main:
+	@_2 = alloc [i32, 10]
+	@_3 = getelemptr @_2, 0
+	store 0, @_3
+	@_4 = getelemptr @_2, 1
+	store 0, @_4
+	@_5 = getelemptr @_2, 2
+	store 0, @_5
+	@_6 = getelemptr @_2, 3
+	store 0, @_6
+	@_7 = getelemptr @_2, 4
+	store 0, @_7
+	@_8 = getelemptr @_2, 5
+	store 0, @_8
+	@_9 = getelemptr @_2, 6
+	store 0, @_9
+	@_10 = getelemptr @_2, 7
+	store 0, @_10
+	@_11 = getelemptr @_2, 8
+	store 0, @_11
+	@_12 = getelemptr @_2, 9
+	store 0, @_12
+	@_13 = alloc [i32, 6]
+	@_14 = getelemptr @_13, 0
+	store 1, @_14
+	@_15 = getelemptr @_13, 1
+	store 2, @_15
+	@_16 = getelemptr @_13, 2
+	store 3, @_16
+	@_17 = getelemptr @_13, 3
+	store 4, @_17
+	@_18 = getelemptr @_13, 4
+	store 0, @_18
+	@_19 = getelemptr @_13, 5
+	store 0, @_19
+	@_20 = alloc i32
+	store 0, @_20
+	@_21 = alloc i32
+	store 0, @_21
+	jump %entry_0
+%entry_0:
+	%0 = load @_21
+	%1 = lt %0, 2
+	br %1, %body_0, %while_end_0
+%body_0:
+	@_22 = alloc i32
+	store 0, @_22
+	jump %entry_1
+%entry_1:
+	%2 = load @_22
+	%3 = lt %2, 3
+	br %3, %body_1, %while_end_1
+%body_1:
+	%4 = load @_20
+	%5 = load @_21
+	%6 = mul %5, 3
+	%7 = load @_22
+	%8 = add %6, %7
+	@_23 = getelemptr @_13, %8
+	%9 = load @_23
+	%10 = add %4, %9
+	%11 = load @_21
+	%12 = mul %11, 3
+	%13 = load @_22
+	%14 = add %12, %13
+	@_24 = getelemptr @_1, %14
+	%15 = load @_24
+	%16 = add %10, %15
+	store %16, @_20
+	%17 = load @_22
+	%18 = add %17, 1
+	store %18, @_22
+	jump %entry_1
+%while_end_1:
+	%19 = load @_21
+	%20 = add %19, 1
+	store %20, @_21
+	jump %entry_0
+%while_end_0:
+	store 0, @_21
+	jump %entry_2
+%entry_2:
+	%21 = load @_21
+	%22 = lt %21, 10
+	br %22, %body_2, %while_end_2
+%body_2:
+	%23 = load @_21
+	@_25 = getelemptr @_2, %23
+	%24 = load @_20
+	%25 = load @_21
+	%26 = add %24, %25
+	store %26, @_25
+	%27 = load @_21
+	@_26 = getelemptr @_0, %27
+	%28 = load @_20
+	%29 = load @_21
+	%30 = add %28, %29
+	store %30, @_26
+	%31 = load @_21
+	%32 = add %31, 1
+	store %32, @_21
+	jump %entry_2
+%while_end_2:
+	%33 = load @_20
+	ret %33
+}
+
