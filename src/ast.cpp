@@ -243,11 +243,13 @@ Result FuncDefAST::print()const
 	str.erase(str.begin());
 	add_basic_block("%entry_"+str);
 	first_block=true;
-	cerr<<"block : \n";
 	block->print();
 	if(need_jump)
 	{
-		out<<"\tret\n";
+		if(type.empty())
+			out<<"\tret\n";
+		else
+			out<<"\tret 0\n";
 		need_jump=false;
 	}
 	out<<"}\n";
@@ -274,10 +276,6 @@ Result FuncFParamAST::print()const
 		++size;
 		for(int i=size-2;~i;--i)
 			array_size[i]*=array_size[i+1];
-		// cerr<<"array_size : ";
-		// for(int i=0;i<size;++i)
-		// 	cerr<<array_size[i]<<" \n";
-		// cerr<<"\n";
 		symbol_size[now]=array_size;
 		ptr_value.insert(now);
 		out<<now<<"_: *i32";
@@ -371,7 +369,6 @@ Result MatchedStmtAST::print()const
 	}
 	if(type==_RETURN)
 	{
-		cerr<<"return\n";
 		check_ex();
 		if(exp.has_value())
 		{
@@ -561,7 +558,6 @@ Result VarDefAST::print()const
 				out<<"global "<<now<<" = alloc [i32, "<<array_size[0]<<"], zeroinit\n";
 				return Result();
 			}
-			cerr<<"empty\n";
 		}
 		int len=array_init.size();
 		if(is_global)
