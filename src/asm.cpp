@@ -4,11 +4,16 @@
 #include<string>
 #include<map>
 #include<unordered_map>
+#include<unordered_set>
 #include"include/asm.hpp"
 #include"include/koopa.h"
 
 using namespace std;
 
+static void _word(const int &value)
+{
+	cout<<"\t.word "<<value<<"\n";
+}
 static void _ret()
 {
 	cout<<"\tret\n";
@@ -110,15 +115,15 @@ class AddressTable
 	private:
 		unordered_map<koopa_raw_value_t,int>f;
 	public:
-		int S,R,A,T,i;
-		int query(const koopa_raw_value_t &v)
+		int R,S,A,T,i;
+		int query(const koopa_raw_value_t &v,int size=4)
 		{
 			auto p=f.find(v);
 			if(p!=f.end())
 				return p->second;
 			f[v]=i;
-			i+=4;
-			return i-4;
+			i+=size;
+			return i-size;
 		}
 		void init(int _R,int _S,int _A)
 		{
@@ -129,25 +134,42 @@ class AddressTable
 		}
 };
 static AddressTable addr;
-static unordered_map<koopa_raw_value_t,int>args_table;
+static unordered_map<koopa_raw_value_t,int>params_table;
 static unordered_map<koopa_raw_value_t,string>global_table;
+static unordered_set<koopa_raw_value_t>ptr_value,ptr2_value;
 static int global_total=0;
 static void load(const string &rd,const koopa_raw_value_t &value)
+{
+
+	if(value->kind.tag==KOOPA_RVT_INTEGER)
+		_li(rd,value->kind.data.integer.value);
+	else
+	{
+		auto p=params_table.find(value);
+		if(p==params_table.end())
+			_lw(rd,"sp",addr.query(value));
+		else
+			if(p->second<8)
+				_mv(rd,"a"+to_string(p->second));
+			else
+				_lw(rd,"sp",addr.T+(p->second-8)*4);
+	}
+}
+static void load_addr(const string &rd,const koopa_raw_value_t &value)
 {
 	if(value->kind.tag==KOOPA_RVT_INTEGER)
 		_li(rd,value->kind.data.integer.value);
 	else
 	{
-		auto p=args_table.find(value);
-		if(p==args_table.end())
-			_lw(rd,"sp",addr.query(value));
+		assert(!params_table.count(value));
+		auto p=global_table.find(value);
+		if(p!=global_table.end())
+			_la(rd,p->second);
 		else
-		{
-			if(p->second<8)
-				_mv(rd,"a"+to_string(p->second));
+			if(ptr_value.count(value))
+				_lw(rd,"sp",addr.query(value));
 			else
-				_lw(rd,"sp",addr.T+(p->second-8)*4);
-		}
+				addi(rd,"sp",addr.query(value));
 	}
 }
 void visit(const koopa_raw_program_t &program)
@@ -178,6 +200,24 @@ void visit(const koopa_raw_slice_t &slice)
 		}
 	}
 }
+static int get_alloc_size(const koopa_raw_type_t &ty)
+{
+	switch(ty->tag)
+	{
+		case KOOPA_RTT_UNIT:
+			return 0;
+		case KOOPA_RTT_FUNCTION:
+			return 0;
+		case KOOPA_RTT_INT32:
+			return 4;
+		case KOOPA_RTT_POINTER:
+			return 4;
+		case KOOPA_RTT_ARRAY:
+			return ty->data.array.len*get_alloc_size(ty->data.array.base);
+	}
+	assert(false);
+	return 0;
+}
 void visit(const koopa_raw_function_t &func)
 {
 	if(!func->bbs.len)
@@ -188,12 +228,12 @@ void visit(const koopa_raw_function_t &func)
 	for(size_t i=0;i<func->bbs.len;++i)
 	{
 		auto bb=reinterpret_cast<koopa_raw_basic_block_t>(func->bbs.buffer[i]);
-		S+=bb->insts.len;
+		S+=bb->insts.len*4;
 		for(size_t j=0;j<bb->insts.len;++j)
 		{
 			auto inst=reinterpret_cast<koopa_raw_value_t>(bb->insts.buffer[j]);
 			if(inst->ty->tag==KOOPA_RTT_UNIT)
-				--S;
+				S-=4;
 			if(inst->kind.tag==KOOPA_RVT_CALL)
 			{
 				R=4;
@@ -201,18 +241,23 @@ void visit(const koopa_raw_function_t &func)
 				if(len-8>A)
 					A=len-8;
 			}
+			if(inst->kind.tag==KOOPA_RVT_ALLOC)
+			{
+				int size=get_alloc_size(inst->ty->data.pointer.base);
+				S+=size-4;
+			}
 		}
 	}
-	S*=4,A*=4;
+	A*=4;
 	addr.init(R,S,A);
-	unordered_map<koopa_raw_value_t,int>().swap(args_table);
+	unordered_map<koopa_raw_value_t,int>().swap(params_table);
 	addi("sp","sp",-addr.T);
 	if(R)
 		_sw("ra","sp",S+A);
 	for(int i=0;i<func->params.len;++i)
 	{
 		auto value=reinterpret_cast<koopa_raw_value_t>(func->params.buffer[i]);
-		args_table[value]=i;
+		params_table[value]=i;
 	}
 	visit(func->bbs);
 }
@@ -230,6 +275,9 @@ void visit(const koopa_raw_value_t &value)
 			visit(kind.data.integer);
 			break;
 		case KOOPA_RVT_ALLOC:
+			addr.query(value,get_alloc_size(value->ty->data.pointer.base));
+			if(value->ty->data.pointer.base->tag==KOOPA_RTT_POINTER)
+				ptr2_value.insert(value);
 			break;
 		case KOOPA_RVT_GLOBAL_ALLOC:
 			visit(kind.data.global_alloc,value);
@@ -239,6 +287,12 @@ void visit(const koopa_raw_value_t &value)
 			break;
 		case KOOPA_RVT_STORE:
 			visit(kind.data.store);
+			break;
+		case KOOPA_RVT_GET_PTR:
+			visit(kind.data.get_ptr,value);
+			break;
+		case KOOPA_RVT_GET_ELEM_PTR:
+			visit(kind.data.get_elem_ptr,value);
 			break;
 		case KOOPA_RVT_BINARY:
 			visit(kind.data.binary,value);
@@ -269,12 +323,22 @@ void visit(const koopa_raw_global_alloc_t &i,const koopa_raw_value_t &value)
 	cout<<"\t.global "<<name<<"\n";
 	cout<<name<<":\n";
 	if(i.init->kind.tag==KOOPA_RVT_INTEGER)
-		cout<<"\t.word "<<i.init->kind.data.integer.value<<"\n";
+		_word(i.init->kind.data.integer.value);
 	else
-	{
-		assert(i.init->kind.tag==KOOPA_RVT_ZERO_INIT);
-		cout<<"\t.zero 4\n";
-	}
+		if(i.init->kind.tag==KOOPA_RVT_ZERO_INIT)
+			cout<<"\t.zero "<<get_alloc_size(i.init->ty)<<"\n";
+		else
+		{
+			assert(i.init->kind.tag==KOOPA_RVT_AGGREGATE);
+			auto aggregate=i.init->kind.data.aggregate;
+			for(int i=0;i<aggregate.elems.len;++i)
+			{
+				auto elem=reinterpret_cast<koopa_raw_value_t>(aggregate.elems.buffer[i]);
+				assert(elem->kind.tag==KOOPA_RVT_INTEGER);
+				_word(elem->kind.data.integer.value);
+			}
+		}
+
 	global_table[value]=name;
 }
 void visit(const koopa_raw_load_t &i,const koopa_raw_value_t &value)
@@ -286,8 +350,16 @@ void visit(const koopa_raw_load_t &i,const koopa_raw_value_t &value)
 		_lw("t1","t1",0);
 	}
 	else
-		_lw("t1","sp",addr.query(i.src));
+		if(ptr_value.count(i.src))
+		{
+			_lw("t1","sp",addr.query(i.src));
+			_lw("t1","t1",0);
+		}
+		else
+			_lw("t1","sp",addr.query(i.src));
 	_sw("t1","sp",addr.query(value));
+	if(ptr2_value.count(i.src))
+		ptr_value.count(value);
 }
 void visit(const koopa_raw_store_t &i)
 {
@@ -299,7 +371,33 @@ void visit(const koopa_raw_store_t &i)
 		_sw("t1","t2",0);
 	}
 	else
-		_sw("t1","sp",addr.query(i.dest));
+		if(ptr_value.count(i.dest))
+		{
+			_lw("t2","sp",addr.query(i.dest));
+			_sw("t1","t2",0);
+		}
+		else
+			_sw("t1","sp",addr.query(i.dest));
+}
+void visit(const koopa_raw_get_ptr_t &i,const koopa_raw_value_t &value)
+{
+	load("t1",i.src);
+	load("t2",i.index);
+	_add("t2","t2","t2");
+	_add("t2","t2","t2");
+	_add("t1","t1","t2");
+	_sw("t1","sp",addr.query(value));
+	ptr_value.insert(value);
+}
+void visit(const koopa_raw_get_elem_ptr_t &i,const koopa_raw_value_t &value)
+{
+	load_addr("t1",i.src);
+	load("t2",i.index);
+	_add("t2","t2","t2");
+	_add("t2","t2","t2");
+	_add("t1","t1","t2");
+	_sw("t1","sp",addr.query(value));
+	ptr_value.insert(value);
 }
 void visit(const koopa_raw_binary_t &i,const koopa_raw_value_t &value)
 {
