@@ -346,6 +346,7 @@ Result MatchedStmtAST::print()const
 	if(type==_BREAK)
 	{
 		int i=while_stack.back();
+		check_ex();
 		out<<"\tjump "<<_while_end(i)<<"\n";
 		need_jump=false;
 		need_ex=true;
@@ -354,6 +355,7 @@ Result MatchedStmtAST::print()const
 	if(type==_CONTINUE)
 	{
 		int i=while_stack.back();
+		check_ex();
 		out<<"\tjump "<<_while_entry(i)<<"\n";
 		need_jump=false;
 		need_ex=true;

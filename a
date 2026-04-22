@@ -8,128 +8,22 @@ decl @starttime()
 decl @stoptime()
 fun @main() : i32 {
 %entry_main:
-	%_0 = alloc [i32, 8]
-	%_1 = getelemptr %_0, 0
-	store 1, %_1
-	%_2 = getelemptr %_0, 1
-	store 2, %_2
-	%_3 = getelemptr %_0, 2
-	store 3, %_3
-	%_4 = getelemptr %_0, 3
-	store 4, %_4
-	%_5 = getelemptr %_0, 4
-	store %_0, %_5
-	%_6 = getelemptr %_0, 5
-	store 0, %_6
-	%_7 = getelemptr %_0, 6
-	store 7, %_7
-	%_8 = getelemptr %_0, 7
-	store 0, %_8
-	%_9 = alloc [i32, 8]
-	%_10 = getelemptr %_9, 0
-	store %_0, %_10
-	%_11 = getelemptr %_9, 1
-	store 0, %_11
-	%_12 = getelemptr %_9, 2
-	store 0, %_12
-	%_13 = getelemptr %_9, 3
-	store 0, %_13
-	%_14 = getelemptr %_9, 4
-	store 0, %_14
-	%_15 = getelemptr %_9, 5
-	store 0, %_15
-	%_16 = getelemptr %_9, 6
-	store 0, %_16
-	%_17 = getelemptr %_9, 7
-	store 0, %_17
-	%_18 = alloc [i32, 8]
-	%_19 = getelemptr %_18, 0
-	store 1, %_19
-	%_20 = getelemptr %_18, 1
-	store 2, %_20
-	%_21 = getelemptr %_18, 2
-	store 3, %_21
-	%_22 = getelemptr %_18, 3
-	store 4, %_22
-	%_23 = getelemptr %_18, 4
-	store 5, %_23
-	%_24 = getelemptr %_18, 5
-	store 6, %_24
-	%_25 = getelemptr %_18, 6
-	store 7, %_25
-	%_26 = getelemptr %_18, 7
-	store 8, %_26
-	%_27 = mul 3, 2
-	%_28 = add %_27, 0
-	%_29 = getelemptr %_0, %_28
-	%_30 = load %_29
-	%_31 = alloc [i32, 8]
-	%_32 = getelemptr %_31, 0
-	store 1, %_32
-	%_33 = getelemptr %_31, 1
-	store 2, %_33
-	%_34 = getelemptr %_31, 2
-	store 3, %_34
-	%_35 = getelemptr %_31, 3
-	store 0, %_35
-	%_36 = getelemptr %_31, 4
-	store 5, %_36
-	%_37 = getelemptr %_31, 5
-	store 0, %_37
-	%_38 = getelemptr %_31, 6
-	store %_30, %_38
-	%_39 = getelemptr %_31, 7
-	store 8, %_39
-	%_40 = mul 2, 2
-	%_41 = add %_40, 1
-	%_42 = getelemptr %_31, %_41
-	%_43 = load %_42
-	%_44 = mul 2, 2
-	%_45 = add %_44, 1
-	%_46 = getelemptr %_18, %_45
-	%_47 = load %_46
-	%_48 = alloc [i32, 8]
-	%_49 = getelemptr %_48, 0
-	store %_43, %_49
-	%_50 = getelemptr %_48, 1
-	store %_47, %_50
-	%_51 = getelemptr %_48, 2
-	store 3, %_51
-	%_52 = getelemptr %_48, 3
-	store 4, %_52
-	%_53 = getelemptr %_48, 4
-	store 5, %_53
-	%_54 = getelemptr %_48, 5
-	store 6, %_54
-	%_55 = getelemptr %_48, 6
-	store 7, %_55
-	%_56 = getelemptr %_48, 7
-	store 8, %_56
-	%_57 = mul 3, 2
-	%_58 = mul 1, 1
-	%_59 = add %_57, %_58
-	%_60 = add %_59, 0
-	%_61 = getelemptr %_48, %_60
-	%_62 = load %_61
-	%_63 = mul 0, 2
-	%_64 = mul 0, 1
-	%_65 = add %_63, %_64
-	%_66 = add %_65, 0
-	%_67 = getelemptr %_48, %_66
-	%_68 = load %_67
-	%_69 = add %_62, %_68
-	%_70 = mul 0, 2
-	%_71 = mul 1, 1
-	%_72 = add %_70, %_71
-	%_73 = add %_72, 0
-	%_74 = getelemptr %_48, %_73
-	%_75 = load %_74
-	%_76 = add %_69, %_75
-	%_77 = mul 3, 2
-	%_78 = add %_77, 0
-	%_79 = getelemptr %_31, %_78
-	%_80 = load %_79
-	%_81 = add %_76, %_80
-	ret %_81
+	%_0 = alloc i32
+	store 0, %_0
+	jump %entry_0
+%entry_0:
+	%_1 = load %_0
+	%_2 = lt %_1, 10
+	br %_2, %body_0, %while_end_0
+%body_0:
+	%_3 = load %_0
+	%_4 = add %_3, 1
+	store %_4, %_0
+	%_5 = load %_0
+	ret %_5
+%ex_0:
+	jump %entry_0
+%while_end_0:
+	ret 0
 }
 
