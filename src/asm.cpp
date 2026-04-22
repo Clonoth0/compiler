@@ -457,8 +457,12 @@ void visit(const koopa_raw_binary_t &i,const koopa_raw_value_t &value)
 void visit(const koopa_raw_branch_t &i)
 {
 	load("t1",i.cond);
-	cout<<"\tbnez t1, "<<i.true_bb->name+1<<"\n";
+	static int cnt=0;
+	string str="long_branch"+to_string(cnt++);
+	cout<<"\tbnez t1, "<<str<<"\n";
 	cout<<"\tj "<<i.false_bb->name+1<<"\n";
+	cout<<str<<":\n";
+	cout<<"\tj "<<i.true_bb->name+1<<"\n";
 }
 void visit(const koopa_raw_jump_t &i)
 {

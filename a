@@ -1,29 +1,40 @@
-decl @getint(): i32
-decl @getch(): i32
-decl @getarray(*i32): i32
-decl @putint(i32)
-decl @putch(i32)
-decl @putarray(i32, *i32)
-decl @starttime()
-decl @stoptime()
-fun @main() : i32 {
-%entry_main:
-	%_0 = alloc i32
-	store 0, %_0
-	jump %entry_0
-%entry_0:
-	%_1 = load %_0
-	%_2 = lt %_1, 10
-	br %_2, %body_0, %while_end_0
-%body_0:
-	%_3 = load %_0
-	%_4 = add %_3, 1
-	store %_4, %_0
-	%_5 = load %_0
-	ret %_5
-%ex_0:
-	jump %entry_0
-%while_end_0:
-	ret 0
-}
+	.data
 
+	.text
+	.global main
+main:
+	addi sp, sp, -32
+entry_main:
+	li t1, 0
+	sw t1, 0(sp)
+	j entry_0
+entry_0:
+	lw t1, 0(sp)
+	sw t1, 4(sp)
+	lw t1, 4(sp)
+	li t2, 10
+	slt t1, t1, t2
+	sw t1, 8(sp)
+	lw t1, 8(sp)
+	bnez t1, long_branch0
+	j while_end_0
+long_branch0:
+	j body_0
+body_0:
+	lw t1, 0(sp)
+	sw t1, 12(sp)
+	lw t1, 12(sp)
+	li t2, 1
+	add t1, t1, t2
+	sw t1, 16(sp)
+	lw t1, 16(sp)
+	sw t1, 0(sp)
+	lw t1, 0(sp)
+	sw t1, 20(sp)
+	lw a0, 20(sp)
+	addi sp, sp, 32
+	ret
+while_end_0:
+	li a0, 0
+	addi sp, sp, 32
+	ret
