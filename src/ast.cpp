@@ -957,9 +957,14 @@ Result AndExpAST::print()const
 			else
 			{
 				auto y=eq_exp->print();
-				Result v(false,_total++);
-				out<<"\t"<<v<<" = ne "<<y<<", 0\n";
-				return v;
+				if(y.imm)
+					return Result(true,(bool)y.value);
+				else
+				{
+					Result v(false,_total++);
+					out<<"\t"<<v<<" = ne "<<y<<", 0\n";
+					return v;
+				}
 			}
 		}
 		else
@@ -1004,9 +1009,14 @@ Result OrExpAST::print()const
 			else
 			{
 				auto y=and_exp->print();
-				Result v(false,_total++);
-				out<<"\t"<<v<<" = ne "<<y<<", 0\n";
-				return v;
+				if(y.imm)
+					return Result(true,(bool)y.value);
+				else
+				{
+					Result v(false,_total++);
+					out<<"\t"<<v<<" = ne "<<y<<", 0\n";
+					return v;
+				}
 			}
 		}
 		else

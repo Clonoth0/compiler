@@ -1,9 +1,6 @@
 int main(){
-    int i=0;
-    while(i<10)
-    {
-        i=i+1;
-        return i;
-        continue;
-    }
+    const int a=2;
+    const int b=0||a;
+    const int c=1&&b;
+    return c;
 }
