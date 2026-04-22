@@ -739,17 +739,29 @@ Result UnaryExpAST::print()const
 			return x;
 		else
 		{
-			Result now(false,_total++);
-			check_ex();
-			if(op.value()=="!")
-				out<<"\t"<<now<<" = eq "<<x<<", 0\n";
+			if(x.imm)
+			{
+				Result now(true);
+				if(op.value()=="-")
+					now.value=-x.value;
+				if(op.value()=="!")
+					now.value=!x.value;
+				return now;
+			}
 			else
 			{
-				assert(op.value()=="-");
-				out<<"\t"<<now<<" = sub 0, "<<x<<"\n";
+				Result now(false,_total++);
+				check_ex();
+				if(op.value()=="!")
+					out<<"\t"<<now<<" = eq "<<x<<", 0\n";
+				else
+				{
+					assert(op.value()=="-");
+					out<<"\t"<<now<<" = sub 0, "<<x<<"\n";
+				}
+				need_jump=true;
+				return now;
 			}
-			need_jump=true;
-			return now;
 		}
 	}
 }
