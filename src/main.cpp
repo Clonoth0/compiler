@@ -28,9 +28,9 @@ int main(int argc, const char *argv[]) {
 	ast->print();
 	if(mode=="-koopa")
 		cout<<out.c_str()<<"\n";
-	if(mode=="-riscv")
+	if(mode=="-riscv"||mode=="-perf")
 	{
-		cerr<<out.c_str()<<endl;
+		// cerr<<out.c_str()<<endl;
 		solve_riscv(out.c_str());
 	}
 	return 0;
