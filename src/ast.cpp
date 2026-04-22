@@ -612,6 +612,8 @@ Result InitValAST::print()const
 				array_init.push_back(now);
 			--init_ptr;
 		}
+		if(inits->empty())
+			array_init.push_back(Result(true,0));
 		while(array_init.empty()||array_init.size()%array_size[q])
 			array_init.push_back(Result(true,0));
 		return Result(false,-1);
