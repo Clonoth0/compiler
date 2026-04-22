@@ -7,7 +7,6 @@
 #include<iostream>
 #include<vector>
 #include<cassert>
-#include<compare>
 #include"koopa.h"
 using namespace std;
 enum StmtType
