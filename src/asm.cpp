@@ -11,76 +11,106 @@
 
 using namespace std;
 
+static string last_sw_rs2,last_sw_rs1;
+static int last_sw_imm;
+static bool last_sw_valid;
+static void _clear_peep() {last_sw_valid=false;}
 static void _word(const int &value)
 {
+	_clear_peep();
 	cout<<"\t.word "<<value<<"\n";
 }
 static void _ret()
 {
+	_clear_peep();
 	cout<<"\tret\n";
 }
 static void _add(const string &rd,const string &rs1,const string &rs2)
 {
+	_clear_peep();
 	cout<<"\tadd "<<rd<<", "<<rs1<<", "<<rs2<<"\n";
 }
 static void _sub(const string &rd,const string &rs1,const string &rs2)
 {
+	_clear_peep();
 	cout<<"\tsub "<<rd<<", "<<rs1<<", "<<rs2<<"\n";
 }
 static void _slt(const string &rd,const string &rs1,const string &rs2)
 {
+	_clear_peep();
 	cout<<"\tslt "<<rd<<", "<<rs1<<", "<<rs2<<"\n";
 }
 static void _sgt(const string &rd,const string &rs1,const string &rs2)
 {
+	_clear_peep();
 	cout<<"\tsgt "<<rd<<", "<<rs1<<", "<<rs2<<"\n";
 }
 static void _seqz(const string &rd,const string &rs)
 {
+	_clear_peep();
 	cout<<"\tseqz "<<rd<<", "<<rs<<"\n";
 }
 static void _snez(const string &rd,const string &rs)
 {
+	_clear_peep();
 	cout<<"\tsnez "<<rd<<", "<<rs<<"\n";
 }
 static void _or(const string &rd,const string &rs1,const string &rs2)
 {
+	_clear_peep();
 	cout<<"\tor "<<rd<<", "<<rs1<<", "<<rs2<<"\n";
 }
 static void _and(const string &rd,const string &rs1,const string &rs2)
 {
+	_clear_peep();
 	cout<<"\tand "<<rd<<", "<<rs1<<", "<<rs2<<"\n";
 }
 static void _xor(const string &rd,const string &rs1,const string &rs2)
 {
+	_clear_peep();
 	cout<<"\txor "<<rd<<", "<<rs1<<", "<<rs2<<"\n";
 }
 static void _mul(const string &rd,const string &rs1,const string &rs2)
 {
+	_clear_peep();
 	cout<<"\tmul "<<rd<<", "<<rs1<<", "<<rs2<<"\n";
 }
 static void _div(const string &rd,const string &rs1,const string &rs2)
 {
+	_clear_peep();
 	cout<<"\tdiv "<<rd<<", "<<rs1<<", "<<rs2<<"\n";
 }
 static void _mod(const string &rd,const string &rs1,const string &rs2)
 {
+	_clear_peep();
 	cout<<"\trem "<<rd<<", "<<rs1<<", "<<rs2<<"\n";
 }
 static void _li(const string &rd,const int &imm)
 {
+	_clear_peep();
 	cout<<"\tli "<<rd<<", "<<imm<<"\n";
 }
 static void _la(const string &rd,const string &lable)
 {
+	_clear_peep();
 	cout<<"\tla "<<rd<<", "<<lable<<"\n";
 }
 static void _mv(const string &rd,const string &rs)
 {
+	_clear_peep();
 	cout<<"\tmv "<<rd<<", "<<rs<<"\n";
 }
 static void _lw(const string &rs,const string &rd,const int &imm)
 {
+	if(last_sw_valid&&rd==last_sw_rs1&&imm==last_sw_imm)
+	{
+		if(rs==last_sw_rs2)
+			return;
+		_clear_peep();
+		cout<<"\tmv "<<rs<<", "<<last_sw_rs2<<"\n";
+		return;
+	}
+	_clear_peep();
 	if(imm>=-2048&&imm<=2047)
 		cout<<"\tlw "<<rs<<", "<<imm<<"("<<rd<<")\n";
 	else
@@ -92,6 +122,10 @@ static void _lw(const string &rs,const string &rd,const int &imm)
 }
 static void _sw(const string &rs2,const string &rs1,const int &imm)
 {
+	last_sw_rs2=rs2;
+	last_sw_rs1=rs1;
+	last_sw_imm=imm;
+	last_sw_valid=true;
 	if(imm>=-2048&&imm<=2047)
 		cout<<"\tsw "<<rs2<<", "<<imm<<"("<<rs1<<")\n";
 	else
@@ -103,6 +137,7 @@ static void _sw(const string &rs2,const string &rs1,const int &imm)
 }
 static void addi(const string &rd,const string &rs1,const int &imm)
 {
+	_clear_peep();
 	if(imm>=-2048&&imm<=2047)
 		cout<<"\taddi "<<rd<<", "<<rs1<<", "<<imm<<"\n";
 	else
@@ -309,8 +344,10 @@ static RegCache rc;
 
 void visit(const koopa_raw_program_t &program)
 {
+	_clear_peep();
 	cout<<"\t.data\n";
 	visit(program.values);
+	_clear_peep();
 	cout<<"\n\t.text\n";
 	visit(program.funcs);
 }
@@ -357,7 +394,9 @@ void visit(const koopa_raw_function_t &func)
 {
 	if(!func->bbs.len)
 		return;
+	_clear_peep();
 	cout<<"\t.global "<<func->name+1<<"\n";
+	_clear_peep();
 	cout<<func->name+1<<":\n";
 	int S=0,R=0,A=0;
 	for(size_t i=0;i<func->bbs.len;++i)
@@ -400,6 +439,7 @@ void visit(const koopa_raw_function_t &func)
 void visit(const koopa_raw_basic_block_t &bb)
 {
 	rc.invalidate();
+	_clear_peep();
 	cout<<bb->name+1<<":\n";
 	visit(bb->insts);
 }
@@ -452,18 +492,24 @@ void visit(const koopa_raw_value_t &value)
 }
 void visit(const koopa_raw_integer_t &i)
 {
+	_clear_peep();
 	cout<<i.value;
 }
 void visit(const koopa_raw_global_alloc_t &i,const koopa_raw_value_t &value)
 {
 	string name="v"+to_string(global_total++);
+	_clear_peep();
 	cout<<"\t.global "<<name<<"\n";
+	_clear_peep();
 	cout<<name<<":\n";
 	if(i.init->kind.tag==KOOPA_RVT_INTEGER)
 		_word(i.init->kind.data.integer.value);
 	else
 		if(i.init->kind.tag==KOOPA_RVT_ZERO_INIT)
+		{
+			_clear_peep();
 			cout<<"\t.zero "<<get_alloc_size(i.init->ty)<<"\n";
+		}
 		else
 		{
 			assert(i.init->kind.tag==KOOPA_RVT_AGGREGATE);
@@ -628,9 +674,13 @@ void visit(const koopa_raw_branch_t &i)
 	rc.flush_all();
 	static int cnt=0;
 	string str="long_branch"+to_string(cnt++);
+	_clear_peep();
 	cout<<"\tbnez "<<cond_reg<<", "<<str<<"\n";
+	_clear_peep();
 	cout<<"\tj "<<i.false_bb->name+1<<"\n";
+	_clear_peep();
 	cout<<str<<":\n";
+	_clear_peep();
 	cout<<"\tj "<<i.true_bb->name+1<<"\n";
 	if(i.cond->kind.tag==KOOPA_RVT_INTEGER)
 		rc.free_pool_reg(cond_reg);
@@ -638,6 +688,7 @@ void visit(const koopa_raw_branch_t &i)
 void visit(const koopa_raw_jump_t &i)
 {
 	rc.flush_all();
+	_clear_peep();
 	cout<<"\tj "<<i.target->name+1<<"\n";
 }
 void visit(const koopa_raw_call_t &i,const koopa_raw_value_t &value)
@@ -655,6 +706,7 @@ void visit(const koopa_raw_call_t &i,const koopa_raw_value_t &value)
 			_sw("t1","sp",(j-8)*4);
 		}
 	}
+	_clear_peep();
 	cout<<"\tcall "<<i.callee->name+1<<"\n";
 	if(value->ty->tag!=KOOPA_RTT_UNIT)
 	{

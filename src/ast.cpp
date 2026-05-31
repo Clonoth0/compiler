@@ -154,8 +154,16 @@ static string _while_end(const int &x)
 }
 static void solve_if_else(const node &exp,const node &stmt1,const node &stmt2)
 {
-	int i=if_total++;
 	auto e=exp->print();
+	if(e.imm)
+	{
+		if(e.value)
+			stmt1->print();
+		else
+			stmt2->print();
+		return;
+	}
+	int i=if_total++;
 	out<<"\tbr "<<e<<", "<<_if_then(i)<<", "<<_if_else(i)<<"\n";
 	need_jump=false;
 	add_basic_block(_if_then(i));
@@ -171,8 +179,14 @@ static void solve_if_else(const node &exp,const node &stmt1,const node &stmt2)
 }
 static void solve_if(const node &exp,const node &stmt)
 {
-	int i=if_total++;
 	auto e=exp->print();
+	if(e.imm)
+	{
+		if(e.value)
+			stmt->print();
+		return;
+	}
+	int i=if_total++;
 	out<<"\tbr "<<e<<", "<<_if_then(i)<<", "<<_if_end(i)<<"\n";
 	need_jump=false;
 	add_basic_block(_if_then(i));
@@ -185,6 +199,26 @@ static void solve_while(const node &exp,const node &stmt)
 	while_stack.push_back(i);
 	add_basic_block(_while_entry(i));
 	auto e=exp->print();
+	if(e.imm)
+	{
+		if(!e.value)
+		{
+			out<<"\tjump "<<_while_end(i)<<"\n";
+			need_jump=false;
+			add_basic_block(_while_end(i));
+			while_stack.pop_back();
+			return;
+		}
+		stmt->print();
+		if(need_jump)
+		{
+			out<<"\tjump "<<_while_entry(i)<<"\n";
+			need_jump=false;
+		}
+		add_basic_block(_while_end(i));
+		while_stack.pop_back();
+		return;
+	}
 	out<<"\tbr "<<e<<", "<<_while_body(i)<<", "<<_while_end(i)<<"\n";
 	need_jump=false;
 	add_basic_block(_while_body(i));
