@@ -5,6 +5,7 @@
 #include<map>
 #include<unordered_map>
 #include<unordered_set>
+#include<vector>
 #include"include/asm.hpp"
 #include"include/koopa.h"
 
@@ -172,6 +173,140 @@ static void load_addr(const string &rd,const koopa_raw_value_t &value)
 				addi(rd,"sp",addr.query(value));
 	}
 }
+
+class RegCache
+{
+	private:
+		vector<string>pool;
+		unordered_map<koopa_raw_value_t,string>v2r;
+		unordered_map<string,koopa_raw_value_t>r2v;
+		unordered_set<koopa_raw_value_t>dirty;
+		koopa_raw_value_t last_get;
+		void _pop_or_spill()
+		{
+			if(pool.empty())
+			{
+				ensure_free(1);
+			}
+		}
+	public:
+		void init()
+		{
+			v2r.clear();
+			r2v.clear();
+			dirty.clear();
+			last_get=nullptr;
+			pool={"t6","t5","t4","t3","t2","t1"};
+		}
+		string alloc_pool_reg()
+		{
+			_pop_or_spill();
+			string r=pool.back();
+			pool.pop_back();
+			return r;
+		}
+		void free_pool_reg(const string &r)
+		{
+			pool.push_back(r);
+		}
+		string get(koopa_raw_value_t v)
+		{
+			if(v->kind.tag==KOOPA_RVT_INTEGER)
+			{
+				string r=alloc_pool_reg();
+				load(r,v);
+				return r;
+			}
+			auto it=v2r.find(v);
+			if(it!=v2r.end())
+			{
+				last_get=v;
+				return it->second;
+			}
+			string r=alloc_pool_reg();
+			load(r,v);
+			v2r[v]=r;
+			r2v[r]=v;
+			last_get=v;
+			return r;
+		}
+		void release(koopa_raw_value_t v)
+		{
+			auto it=v2r.find(v);
+			if(it==v2r.end())
+				return;
+			string r=it->second;
+			r2v.erase(r);
+			dirty.erase(v);
+			v2r.erase(it);
+			pool.push_back(r);
+		}
+		void set(koopa_raw_value_t v,const string &r)
+		{
+			auto old=r2v.find(r);
+			if(old!=r2v.end())
+			{
+				dirty.erase(old->second);
+				v2r.erase(old->second);
+				r2v.erase(old);
+			}
+			for(auto it=pool.begin();it!=pool.end();++it)
+				if(*it==r){pool.erase(it);break;}
+			v2r[v]=r;
+			r2v[r]=v;
+			dirty.insert(v);
+		}
+		void ensure_free(int n)
+		{
+			while((int)pool.size()<n)
+			{
+				koopa_raw_value_t v=nullptr;
+				for(const auto &p:r2v)
+					if(p.second!=last_get)
+					{
+						v=p.second;
+						break;
+					}
+				if(!v&&!r2v.empty())
+					v=r2v.begin()->second;
+				if(!v)
+					return;
+				auto r=v2r[v];
+				if(dirty.count(v))
+				{
+					_sw(r,"sp",addr.query(v));
+					dirty.erase(v);
+				}
+				r2v.erase(r);
+				v2r.erase(v);
+				pool.push_back(r);
+			}
+		}
+		void flush_all()
+		{
+			vector<pair<string,koopa_raw_value_t>>to_write;
+			for(const auto &p:r2v)
+				if(dirty.count(p.second))
+					to_write.push_back(p);
+			for(const auto &p:to_write)
+				_sw(p.first,"sp",addr.query(p.second));
+			v2r.clear();
+			r2v.clear();
+			dirty.clear();
+			last_get=nullptr;
+			pool={"t6","t5","t4","t3","t2","t1"};
+		}
+		void invalidate()
+		{
+			v2r.clear();
+			r2v.clear();
+			dirty.clear();
+			last_get=nullptr;
+			pool={"t6","t5","t4","t3","t2","t1"};
+		}
+};
+static RegCache rc;
+
 void visit(const koopa_raw_program_t &program)
 {
 	cout<<"\t.data\n";
@@ -251,6 +386,7 @@ void visit(const koopa_raw_function_t &func)
 	A*=4;
 	addr.init(R,S,A);
 	unordered_map<koopa_raw_value_t,int>().swap(params_table);
+	rc.init();
 	addi("sp","sp",-addr.T);
 	if(R)
 		_sw("ra","sp",S+A);
@@ -263,6 +399,7 @@ void visit(const koopa_raw_function_t &func)
 }
 void visit(const koopa_raw_basic_block_t &bb)
 {
+	rc.invalidate();
 	cout<<bb->name+1<<":\n";
 	visit(bb->insts);
 }
@@ -344,152 +481,200 @@ void visit(const koopa_raw_global_alloc_t &i,const koopa_raw_value_t &value)
 void visit(const koopa_raw_load_t &i,const koopa_raw_value_t &value)
 {
 	auto p=global_table.find(i.src);
+	string result_reg=rc.alloc_pool_reg();
 	if(p!=global_table.end())
 	{
-		_la("t1",p->second);
-		_lw("t1","t1",0);
+		string addr_reg=rc.alloc_pool_reg();
+		_la(addr_reg,p->second);
+		_lw(result_reg,addr_reg,0);
+		rc.free_pool_reg(addr_reg);
 	}
 	else
 		if(ptr_value.count(i.src))
 		{
-			_lw("t1","sp",addr.query(i.src));
-			_lw("t1","t1",0);
+			string ptr_reg=rc.get(i.src);
+			_lw(result_reg,ptr_reg,0);
+			if(i.src->kind.tag==KOOPA_RVT_INTEGER)
+				rc.free_pool_reg(ptr_reg);
 		}
 		else
-			_lw("t1","sp",addr.query(i.src));
-	_sw("t1","sp",addr.query(value));
+			_lw(result_reg,"sp",addr.query(i.src));
+	rc.set(value,result_reg);
 	if(ptr2_value.count(i.src))
 		ptr_value.count(value);
 }
 void visit(const koopa_raw_store_t &i)
 {
-	load("t1",i.value);
+	string val_reg=rc.get(i.value);
 	auto p=global_table.find(i.dest);
 	if(p!=global_table.end())
 	{
-		_la("t2",p->second);
-		_sw("t1","t2",0);
+		string addr_reg=rc.alloc_pool_reg();
+		_la(addr_reg,p->second);
+		_sw(val_reg,addr_reg,0);
+		rc.free_pool_reg(addr_reg);
 	}
 	else
 		if(ptr_value.count(i.dest))
 		{
-			_lw("t2","sp",addr.query(i.dest));
-			_sw("t1","t2",0);
+			string ptr_reg=rc.get(i.dest);
+			_sw(val_reg,ptr_reg,0);
+			if(i.dest->kind.tag==KOOPA_RVT_INTEGER)
+				rc.free_pool_reg(ptr_reg);
 		}
 		else
-			_sw("t1","sp",addr.query(i.dest));
+		{
+			_sw(val_reg,"sp",addr.query(i.dest));
+			rc.release(i.dest);
+		}
+	if(i.value->kind.tag==KOOPA_RVT_INTEGER)
+		rc.free_pool_reg(val_reg);
 }
 void visit(const koopa_raw_get_ptr_t &i,const koopa_raw_value_t &value)
 {
-	load("t1",i.src);
-	load("t2",i.index);
-	_add("t2","t2","t2");
-	_add("t2","t2","t2");
-	_add("t1","t1","t2");
-	_sw("t1","sp",addr.query(value));
+	string src_reg=rc.get(i.src);
+	string idx_reg=rc.get(i.index);
+	_add(idx_reg,idx_reg,idx_reg);
+	_add(idx_reg,idx_reg,idx_reg);
+	_add(src_reg,src_reg,idx_reg);
+	if(i.index->kind.tag==KOOPA_RVT_INTEGER)
+		rc.free_pool_reg(idx_reg);
+	rc.release(i.src);
+	rc.set(value,src_reg);
 	ptr_value.insert(value);
 }
 void visit(const koopa_raw_get_elem_ptr_t &i,const koopa_raw_value_t &value)
 {
-	load_addr("t1",i.src);
-	load("t2",i.index);
-	_add("t2","t2","t2");
-	_add("t2","t2","t2");
-	_add("t1","t1","t2");
-	_sw("t1","sp",addr.query(value));
+	string addr_reg;
+	if(ptr_value.count(i.src))
+		addr_reg=rc.get(i.src);
+	else
+	{
+		addr_reg=rc.alloc_pool_reg();
+		load_addr(addr_reg,i.src);
+	}
+	string idx_reg=rc.get(i.index);
+	_add(idx_reg,idx_reg,idx_reg);
+	_add(idx_reg,idx_reg,idx_reg);
+	_add(addr_reg,addr_reg,idx_reg);
+	if(i.index->kind.tag==KOOPA_RVT_INTEGER)
+		rc.free_pool_reg(idx_reg);
+	if(ptr_value.count(i.src))
+		rc.release(i.src);
+	rc.set(value,addr_reg);
 	ptr_value.insert(value);
 }
 void visit(const koopa_raw_binary_t &i,const koopa_raw_value_t &value)
 {
-	load("t1",i.lhs);
-	load("t2",i.rhs);
-	const string now="t1",lhs="t1",rhs="t2";
+	rc.ensure_free(2);
+	string lhs=rc.get(i.lhs);
+	string rhs=rc.get(i.rhs);
+	rc.release(i.lhs);
 	switch(i.op)
 	{
 		case KOOPA_RBO_NOT_EQ:
-			_xor(now,lhs,rhs);
-			_snez(now,now);
+			_xor(lhs,lhs,rhs);
+			_snez(lhs,lhs);
 			break;
 		case KOOPA_RBO_EQ:
-			_xor(now,lhs,rhs);
-			_seqz(now,now);
+			_xor(lhs,lhs,rhs);
+			_seqz(lhs,lhs);
 			break;
 		case KOOPA_RBO_GT:
-			_sgt(now,lhs,rhs);
+			_sgt(lhs,lhs,rhs);
 			break;
 		case KOOPA_RBO_LT:
-			_slt(now,lhs,rhs);
+			_slt(lhs,lhs,rhs);
 			break;
 		case KOOPA_RBO_GE:
-			_slt(now,lhs,rhs);
-			_seqz(now,now);
+			_slt(lhs,lhs,rhs);
+			_seqz(lhs,lhs);
 			break;
 		case KOOPA_RBO_LE:
-			_sgt(now,lhs,rhs);
-			_seqz(now,now);
+			_sgt(lhs,lhs,rhs);
+			_seqz(lhs,lhs);
 			break;
 		case KOOPA_RBO_ADD:
-			_add(now,lhs,rhs);
+			_add(lhs,lhs,rhs);
 			break;
 		case KOOPA_RBO_SUB:
-			_sub(now,lhs,rhs);
+			_sub(lhs,lhs,rhs);
 			break;
 		case KOOPA_RBO_MUL:
-			_mul(now,lhs,rhs);
+			_mul(lhs,lhs,rhs);
 			break;
 		case KOOPA_RBO_DIV:
-			_div(now,lhs,rhs);
+			_div(lhs,lhs,rhs);
 			break;
 		case KOOPA_RBO_MOD:
-			_mod(now,lhs,rhs);
+			_mod(lhs,lhs,rhs);
 			break;
 		case KOOPA_RBO_AND:
-			_and(now,lhs,rhs);
+			_and(lhs,lhs,rhs);
 			break;
 		case KOOPA_RBO_OR:
-			_or(now,lhs,rhs);
+			_or(lhs,lhs,rhs);
 			break;
 		default:
 			assert(false);
 	}
-	_sw(now,"sp",addr.query(value));
+	if(i.rhs->kind.tag==KOOPA_RVT_INTEGER)
+		rc.free_pool_reg(rhs);
+	rc.set(value,lhs);
 }
 void visit(const koopa_raw_branch_t &i)
 {
-	load("t1",i.cond);
+	string cond_reg=rc.get(i.cond);
+	rc.flush_all();
 	static int cnt=0;
 	string str="long_branch"+to_string(cnt++);
-	cout<<"\tbnez t1, "<<str<<"\n";
+	cout<<"\tbnez "<<cond_reg<<", "<<str<<"\n";
 	cout<<"\tj "<<i.false_bb->name+1<<"\n";
 	cout<<str<<":\n";
 	cout<<"\tj "<<i.true_bb->name+1<<"\n";
+	if(i.cond->kind.tag==KOOPA_RVT_INTEGER)
+		rc.free_pool_reg(cond_reg);
 }
 void visit(const koopa_raw_jump_t &i)
 {
+	rc.flush_all();
 	cout<<"\tj "<<i.target->name+1<<"\n";
 }
 void visit(const koopa_raw_call_t &i,const koopa_raw_value_t &value)
 {
+	rc.flush_all();
 	int len=i.args.len;
 	for(int j=0;j<len;++j)
 	{
-		auto value=reinterpret_cast<koopa_raw_value_t>(i.args.buffer[j]);
+		auto val=reinterpret_cast<koopa_raw_value_t>(i.args.buffer[j]);
 		if(j<8)
-			load("a"+to_string(j),value);
+			load("a"+to_string(j),val);
 		else
 		{
-			load("t1",value);
+			load("t1",val);
 			_sw("t1","sp",(j-8)*4);
 		}
 	}
 	cout<<"\tcall "<<i.callee->name+1<<"\n";
 	if(value->ty->tag!=KOOPA_RTT_UNIT)
-		_sw("a0","sp",addr.query(value));
+	{
+		string result_reg=rc.alloc_pool_reg();
+		_mv(result_reg,"a0");
+		rc.set(value,result_reg);
+	}
 }
 void visit(const koopa_raw_return_t &i)
 {
 	if(i.value)
-		load("a0",i.value);
+	{
+		if(i.value->kind.tag==KOOPA_RVT_INTEGER)
+			_li("a0",i.value->kind.data.integer.value);
+		else
+		{
+			auto reg=rc.get(i.value);
+			_mv("a0",reg);
+		}
+	}
 	else
 		_li("a0",0);
 	if(addr.R)
@@ -501,18 +686,10 @@ void solve_riscv(const char *str)
 {
 	koopa_program_t program;
 	koopa_error_code_t ret = koopa_parse_from_string(str, &program);
-	assert(ret == KOOPA_EC_SUCCESS);  // 确保解析时没有出错
-	// 创建一个 raw program builder, 用来构建 raw program
+	assert(ret == KOOPA_EC_SUCCESS);
 	koopa_raw_program_builder_t builder = koopa_new_raw_program_builder();
-	// 将 Koopa IR 程序转换为 raw program
 	koopa_raw_program_t raw = koopa_build_raw_program(builder, program);
-	// 释放 Koopa IR 程序占用的内存
 	koopa_delete_program(program);
-	// 处理 raw program
-	// ...
 	visit(raw);
-	// 处理完成, 释放 raw program builder 占用的内存
-	// 注意, raw program 中所有的指针指向的内存均为 raw program builder 的内存
-	// 所以不要在 raw program 处理完毕之前释放 builder
 	koopa_delete_raw_program_builder(builder);
 }
