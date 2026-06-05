@@ -6,6 +6,8 @@
 #include<unordered_map>
 #include<unordered_set>
 #include<vector>
+#include<algorithm>
+#include<tuple>
 #include"include/asm.hpp"
 #include"include/koopa.h"
 
@@ -174,6 +176,63 @@ static unordered_map<koopa_raw_value_t,int>params_table;
 static unordered_map<koopa_raw_value_t,string>global_table;
 static unordered_set<koopa_raw_value_t>ptr_value,ptr2_value;
 static int global_total=0;
+
+static int get_alloc_size(const koopa_raw_type_t &ty)
+{
+	switch(ty->tag)
+	{
+		case KOOPA_RTT_UNIT: return 0;
+		case KOOPA_RTT_FUNCTION: return 0;
+		case KOOPA_RTT_INT32: return 4;
+		case KOOPA_RTT_POINTER: return 4;
+		case KOOPA_RTT_ARRAY: return ty->data.array.len*get_alloc_size(ty->data.array.base);
+	}
+	assert(false);
+	return 0;
+}
+
+static bool is_allocatable(const koopa_raw_value_t &v)
+{
+	switch(v->kind.tag)
+	{
+		case KOOPA_RVT_LOAD: case KOOPA_RVT_GET_PTR:
+		case KOOPA_RVT_GET_ELEM_PTR: case KOOPA_RVT_BINARY:
+			return true;
+		case KOOPA_RVT_CALL: return v->ty->tag!=KOOPA_RTT_UNIT;
+		case KOOPA_RVT_FUNC_ARG_REF: return true;
+		default: return false;
+	}
+}
+
+struct LSInterval{koopa_raw_value_t val;int def;int last_use;};
+
+static unordered_map<koopa_raw_value_t,int>lsra_def,lsra_last_use;
+static unordered_map<koopa_raw_value_t,int>lsra_alloc;
+
+static void lsra_record_use(koopa_raw_value_t v,int idx)
+{
+	if(!v||v->kind.tag==KOOPA_RVT_INTEGER||v->kind.tag==KOOPA_RVT_GLOBAL_ALLOC||global_table.count(v)) return;
+	if(idx>lsra_last_use[v]) lsra_last_use[v]=idx;
+}
+
+static void run_lsra()
+{
+	vector<LSInterval>iv;
+	for(auto &p:lsra_def){auto v=p.first;int d=p.second,e=d;auto it=lsra_last_use.find(v);if(it!=lsra_last_use.end())e=it->second;iv.push_back({v,d,e});}
+	sort(iv.begin(),iv.end(),[](const LSInterval&a,const LSInterval&b){if(a.def!=b.def)return a.def<b.def;return a.last_use<b.last_use;});
+	vector<tuple<int,koopa_raw_value_t,int>>act;
+	vector<bool>free_r(6,true);
+	vector<string>rpool={"t6","t5","t4","t3","t2","t1"};
+	for(auto&x:iv)
+	{
+		auto v=x.val;int d=x.def,e=x.last_use;
+		auto it=act.begin();
+		while(it!=act.end()){if(get<2>(*it)<d){free_r[get<0>(*it)]=true;it=act.erase(it);}else ++it;}
+		if((int)act.size()<6){int ri=-1;for(int i=0;i<6;++i)if(free_r[i]){ri=i;break;}free_r[ri]=false;lsra_alloc[v]=ri;auto p=act.begin();while(p!=act.end()&&get<2>(*p)<e)++p;act.insert(p,{ri,v,e});}
+		else{int fe=get<2>(act.back());if(fe>e){int ri=get<0>(act.back());lsra_alloc.erase(get<1>(act.back()));lsra_alloc[v]=ri;act.pop_back();auto p=act.begin();while(p!=act.end()&&get<2>(*p)<e)++p;act.insert(p,{ri,v,e});}}
+	}
+}
+
 static void load(const string &rd,const koopa_raw_value_t &value)
 {
 
@@ -217,6 +276,8 @@ class RegCache
 		unordered_map<string,koopa_raw_value_t>r2v;
 		unordered_set<koopa_raw_value_t>dirty;
 		koopa_raw_value_t last_get;
+		unordered_map<koopa_raw_value_t,int>lsra_alloc;
+		vector<string>lsra_regs={"t6","t5","t4","t3","t2","t1"};
 		void _pop_or_spill()
 		{
 			if(pool.empty())
@@ -224,7 +285,17 @@ class RegCache
 				ensure_free(1);
 			}
 		}
+		int _prefer_reg(koopa_raw_value_t v)
+		{
+			auto it=lsra_alloc.find(v);
+			if(it==lsra_alloc.end()) return -1;
+			return it->second;
+		}
 	public:
+		void set_lsra(const unordered_map<koopa_raw_value_t,int>&a)
+		{
+			lsra_alloc=a;
+		}
 		void init()
 		{
 			v2r.clear();
@@ -257,6 +328,24 @@ class RegCache
 			{
 				last_get=v;
 				return it->second;
+			}
+			int ri=_prefer_reg(v);
+			if(ri>=0)
+			{
+				string prefer=lsra_regs[ri];
+				bool in_pool=false;
+				for(auto p=pool.begin();p!=pool.end();++p)
+					if(*p==prefer){in_pool=true;break;}
+				if(in_pool&&!r2v.count(prefer))
+				{
+					for(auto p=pool.begin();p!=pool.end();++p)
+						if(*p==prefer){pool.erase(p);break;}
+					load(prefer,v);
+					v2r[v]=prefer;
+					r2v[prefer]=v;
+					last_get=v;
+					return prefer;
+				}
 			}
 			string r=alloc_pool_reg();
 			load(r,v);
@@ -372,24 +461,7 @@ void visit(const koopa_raw_slice_t &slice)
 		}
 	}
 }
-static int get_alloc_size(const koopa_raw_type_t &ty)
-{
-	switch(ty->tag)
-	{
-		case KOOPA_RTT_UNIT:
-			return 0;
-		case KOOPA_RTT_FUNCTION:
-			return 0;
-		case KOOPA_RTT_INT32:
-			return 4;
-		case KOOPA_RTT_POINTER:
-			return 4;
-		case KOOPA_RTT_ARRAY:
-			return ty->data.array.len*get_alloc_size(ty->data.array.base);
-	}
-	assert(false);
-	return 0;
-}
+
 void visit(const koopa_raw_function_t &func)
 {
 	if(!func->bbs.len)
@@ -398,7 +470,12 @@ void visit(const koopa_raw_function_t &func)
 	cout<<"\t.global "<<func->name+1<<"\n";
 	_clear_peep();
 	cout<<func->name+1<<":\n";
+
+	lsra_def.clear();lsra_last_use.clear();lsra_alloc.clear();
 	int S=0,R=0,A=0;
+	for(int i=0;i<func->params.len;++i)
+		lsra_def[reinterpret_cast<koopa_raw_value_t>(func->params.buffer[i])]=0;
+	int idx=0;
 	for(size_t i=0;i<func->bbs.len;++i)
 	{
 		auto bb=reinterpret_cast<koopa_raw_basic_block_t>(func->bbs.buffer[i]);
@@ -406,36 +483,42 @@ void visit(const koopa_raw_function_t &func)
 		for(size_t j=0;j<bb->insts.len;++j)
 		{
 			auto inst=reinterpret_cast<koopa_raw_value_t>(bb->insts.buffer[j]);
-			if(inst->ty->tag==KOOPA_RTT_UNIT)
-				S-=4;
-			if(inst->kind.tag==KOOPA_RVT_CALL)
+			if(is_allocatable(inst)) lsra_def[inst]=idx;
+			if(inst->ty->tag==KOOPA_RTT_UNIT) S-=4;
+			if(inst->kind.tag==KOOPA_RVT_CALL){R=4;int len=inst->kind.data.call.args.len;if((len-8)*4>A) A=(len-8)*4;}
+			if(inst->kind.tag==KOOPA_RVT_ALLOC){int size=get_alloc_size(inst->ty->data.pointer.base);S+=size-4;}
+			switch(inst->kind.tag)
 			{
-				R=4;
-				int len=inst->kind.data.call.args.len;
-				if(len-8>A)
-					A=len-8;
+				case KOOPA_RVT_LOAD: lsra_record_use(inst->kind.data.load.src,idx); break;
+				case KOOPA_RVT_STORE: lsra_record_use(inst->kind.data.store.value,idx); if(ptr_value.count(inst->kind.data.store.dest)) lsra_record_use(inst->kind.data.store.dest,idx); break;
+				case KOOPA_RVT_GET_PTR: lsra_record_use(inst->kind.data.get_ptr.src,idx); lsra_record_use(inst->kind.data.get_ptr.index,idx); break;
+				case KOOPA_RVT_GET_ELEM_PTR: lsra_record_use(inst->kind.data.get_elem_ptr.src,idx); lsra_record_use(inst->kind.data.get_elem_ptr.index,idx); break;
+				case KOOPA_RVT_BINARY: lsra_record_use(inst->kind.data.binary.lhs,idx); lsra_record_use(inst->kind.data.binary.rhs,idx); break;
+				case KOOPA_RVT_BRANCH: lsra_record_use(inst->kind.data.branch.cond,idx); break;
+				case KOOPA_RVT_CALL: for(int k=0;k<inst->kind.data.call.args.len;++k) lsra_record_use(reinterpret_cast<koopa_raw_value_t>(inst->kind.data.call.args.buffer[k]),idx); break;
+				case KOOPA_RVT_RETURN: lsra_record_use(inst->kind.data.ret.value,idx); break;
+				default: break;
 			}
-			if(inst->kind.tag==KOOPA_RVT_ALLOC)
-			{
-				int size=get_alloc_size(inst->ty->data.pointer.base);
-				S+=size-4;
-			}
+			++idx;
 		}
 	}
 	A*=4;
+	run_lsra();
 	addr.init(R,S,A);
 	unordered_map<koopa_raw_value_t,int>().swap(params_table);
 	rc.init();
-	addi("sp","sp",-addr.T);
-	if(R)
-		_sw("ra","sp",S+A);
+	rc.set_lsra(lsra_alloc);
 	for(int i=0;i<func->params.len;++i)
 	{
 		auto value=reinterpret_cast<koopa_raw_value_t>(func->params.buffer[i]);
 		params_table[value]=i;
 	}
+	addi("sp","sp",-addr.T);
+	if(R)
+		_sw("ra","sp",S+A);
 	visit(func->bbs);
 }
+
 void visit(const koopa_raw_basic_block_t &bb)
 {
 	rc.invalidate();
