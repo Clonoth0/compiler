@@ -16,7 +16,10 @@ using namespace std;
 static string last_sw_rs2,last_sw_rs1;
 static int last_sw_imm;
 static bool last_sw_valid;
-static void _clear_peep() {last_sw_valid=false;}
+static string last_lw_rs,last_lw_rd;
+static int last_lw_imm;
+static bool last_lw_valid;
+static void _clear_peep() {last_sw_valid=false;last_lw_valid=false;}
 static void _word(const int &value)
 {
 	_clear_peep();
@@ -107,14 +110,21 @@ static void _lw(const string &rs,const string &rd,const int &imm)
 	if(last_sw_valid&&rd==last_sw_rs1&&imm==last_sw_imm)
 	{
 		if(rs==last_sw_rs2)
+		{
+			last_lw_rs=rs;last_lw_rd=rd;last_lw_imm=imm;last_lw_valid=true;
 			return;
+		}
 		_clear_peep();
 		cout<<"\tmv "<<rs<<", "<<last_sw_rs2<<"\n";
+		last_lw_rs=rs;last_lw_rd=rd;last_lw_imm=imm;last_lw_valid=true;
 		return;
 	}
 	_clear_peep();
 	if(imm>=-2048&&imm<=2047)
+	{
 		cout<<"\tlw "<<rs<<", "<<imm<<"("<<rd<<")\n";
+		last_lw_rs=rs;last_lw_rd=rd;last_lw_imm=imm;last_lw_valid=true;
+	}
 	else
 	{
 		_li("t0",imm);
@@ -124,23 +134,50 @@ static void _lw(const string &rs,const string &rd,const int &imm)
 }
 static void _sw(const string &rs2,const string &rs1,const int &imm)
 {
+	if(last_lw_valid&&rs1==last_lw_rd&&imm==last_lw_imm&&rs2==last_lw_rs)
+	{
+		last_lw_valid=false;
+		return;
+	}
 	last_sw_rs2=rs2;
 	last_sw_rs1=rs1;
 	last_sw_imm=imm;
 	last_sw_valid=true;
+	last_lw_valid=false;
 	if(imm>=-2048&&imm<=2047)
-		cout<<"\tsw "<<rs2<<", "<<imm<<"("<<rs1<<")\n";
+	{
+		if(rs2=="t0"&&rs1=="t0")
+		{
+			_mv("a7","t0");
+			cout<<"\tsw t0, 0(a7)\n";
+		}
+		else
+			cout<<"\tsw "<<rs2<<", "<<imm<<"("<<rs1<<")\n";
+	}
 	else
 	{
-		_li("t0",imm);
-		_add("t0",rs1,"t0");
-		_sw(rs2,"t0",0);
+		if(rs2=="t0")
+		{
+			_li("a7",imm);
+			_add("a7",rs1,"a7");
+			cout<<"\tsw t0, 0(a7)\n";
+		}
+		else
+		{
+			_li("t0",imm);
+			_add("t0",rs1,"t0");
+			_sw(rs2,"t0",0);
+		}
 	}
 }
 static void addi(const string &rd,const string &rs1,const int &imm)
 {
 	_clear_peep();
-	if(imm>=-2048&&imm<=2047)
+	if(imm==0)
+	{
+		if(rd!=rs1) cout<<"\tmv "<<rd<<", "<<rs1<<"\n";
+	}
+	else if(imm>=-2048&&imm<=2047)
 		cout<<"\taddi "<<rd<<", "<<rs1<<", "<<imm<<"\n";
 	else
 	{
@@ -333,6 +370,23 @@ class RegCache
 			if(ri>=0)
 			{
 				string prefer=lsra_regs[ri];
+				auto old_it=r2v.find(prefer);
+				if(old_it!=r2v.end()&&!lsra_alloc.count(old_it->second))
+				{
+					koopa_raw_value_t old_v=old_it->second;
+					if(dirty.count(old_v))
+					{
+						_sw(prefer,"sp",addr.query(old_v));
+						dirty.erase(old_v);
+					}
+					r2v.erase(old_it);
+					v2r.erase(old_v);
+					load(prefer,v);
+					v2r[v]=prefer;
+					r2v[prefer]=v;
+					last_get=v;
+					return prefer;
+				}
 				bool in_pool=false;
 				for(auto p=pool.begin();p!=pool.end();++p)
 					if(*p==prefer){in_pool=true;break;}
@@ -386,11 +440,18 @@ class RegCache
 			{
 				koopa_raw_value_t v=nullptr;
 				for(const auto &p:r2v)
-					if(p.second!=last_get)
+					if(!lsra_alloc.count(p.second)&&p.second!=last_get)
 					{
 						v=p.second;
 						break;
 					}
+				if(!v)
+					for(const auto &p:r2v)
+						if(p.second!=last_get)
+						{
+							v=p.second;
+							break;
+						}
 				if(!v&&!r2v.empty())
 					v=r2v.begin()->second;
 				if(!v)

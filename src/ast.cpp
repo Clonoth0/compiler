@@ -856,19 +856,48 @@ Result MulExpAST::print()const
 				now.value=x.value%y.value;
 			return now;
 		}
-		else
+		if(y.imm)
 		{
-			Result now(false,_total++);
-			check_ex();
 			if(value->second=="*")
-				out<<"\t"<<now<<" = mul "<<x<<", "<<y<<"\n";
+			{
+				if(y.value==1) return x;
+				if(y.value==0) return Result(true,0);
+			}
 			if(value->second=="/")
-				out<<"\t"<<now<<" = div "<<x<<", "<<y<<"\n";
+			{
+				if(y.value==1) return x;
+			}
 			if(value->second=="%")
-				out<<"\t"<<now<<" = mod "<<x<<", "<<y<<"\n";
-			need_jump=true;
-			return Result(now);
+			{
+				if(y.value==1) return Result(true,0);
+			}
 		}
+		if(x.imm)
+		{
+			if(value->second=="*")
+			{
+				if(x.value==1) return y;
+				if(x.value==0) return Result(true,0);
+			}
+			if(value->second=="/")
+			{
+				if(x.value==0) return Result(true,0);
+			}
+			if(value->second=="%")
+			{
+				if(x.value==0) return Result(true,0);
+			}
+		}
+		Result now(false,_total++);
+		check_ex();
+		if(value->second=="*")
+			out<<"\t"<<now<<" = mul "<<x<<", "<<y<<"\n";
+		if(value->second=="/")
+			out<<"\t"<<now<<" = div "<<x<<", "<<y<<"\n";
+		if(value->second=="%")
+			out<<"\t"<<now<<" = mod "<<x<<", "<<y<<"\n";
+		need_jump=true;
+		return Result(now);
 	}
 }
 Result AddExpAST::print()const
@@ -890,17 +919,18 @@ Result AddExpAST::print()const
 				now.value=x.value-y.value;
 			return now;
 		}
-		else
-		{
-			Result now(false,_total++);
-			check_ex();
-			if(value->second=="+")
-				out<<"\t"<<now<<" = add "<<x<<", "<<y<<"\n";
-			if(value->second=="-")
-				out<<"\t"<<now<<" = sub "<<x<<", "<<y<<"\n";
-			need_jump=true;
-			return now;
-		}
+		if(y.imm&&y.value==0)
+			return x;
+		if(x.imm&&x.value==0&&value->second=="+")
+			return y;
+		Result now(false,_total++);
+		check_ex();
+		if(value->second=="+")
+			out<<"\t"<<now<<" = add "<<x<<", "<<y<<"\n";
+		if(value->second=="-")
+			out<<"\t"<<now<<" = sub "<<x<<", "<<y<<"\n";
+		need_jump=true;
+		return now;
 	}
 }
 Result RelExpAST::print()const
