@@ -370,23 +370,6 @@ class RegCache
 			if(ri>=0)
 			{
 				string prefer=lsra_regs[ri];
-				auto old_it=r2v.find(prefer);
-				if(old_it!=r2v.end()&&!lsra_alloc.count(old_it->second))
-				{
-					koopa_raw_value_t old_v=old_it->second;
-					if(dirty.count(old_v))
-					{
-						_sw(prefer,"sp",addr.query(old_v));
-						dirty.erase(old_v);
-					}
-					r2v.erase(old_it);
-					v2r.erase(old_v);
-					load(prefer,v);
-					v2r[v]=prefer;
-					r2v[prefer]=v;
-					last_get=v;
-					return prefer;
-				}
 				bool in_pool=false;
 				for(auto p=pool.begin();p!=pool.end();++p)
 					if(*p==prefer){in_pool=true;break;}
@@ -440,18 +423,11 @@ class RegCache
 			{
 				koopa_raw_value_t v=nullptr;
 				for(const auto &p:r2v)
-					if(!lsra_alloc.count(p.second)&&p.second!=last_get)
+					if(p.second!=last_get)
 					{
 						v=p.second;
 						break;
 					}
-				if(!v)
-					for(const auto &p:r2v)
-						if(p.second!=last_get)
-						{
-							v=p.second;
-							break;
-						}
 				if(!v&&!r2v.empty())
 					v=r2v.begin()->second;
 				if(!v)
