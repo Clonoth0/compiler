@@ -433,8 +433,6 @@ class RegCache
 			v2r[v]=r;
 			r2v[r]=v;
 			dirty.insert(v);
-			_sw(r,"sp",addr.query(v));
-			dirty.erase(v);
 		}
 		void ensure_free(int n)
 		{
