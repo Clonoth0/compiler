@@ -190,7 +190,7 @@ class AddressTable
 	private:
 		unordered_map<koopa_raw_value_t,int>f;
 	public:
-		int R,S,A,T,i;
+		int R,S,S2,A,T,i;
 		int query(const koopa_raw_value_t &v,int size=4)
 		{
 			auto p=f.find(v);
@@ -200,10 +200,10 @@ class AddressTable
 			i+=size;
 			return i-size;
 		}
-		void init(int _R,int _S,int _A)
+		void init(int _R,int _S,int _A,int _S2=0)
 		{
-			R=_R,S=_S,A=_A;
-			T=(S+R+A+15)/16*16;
+			R=_R,S=_S,S2=_S2,A=_A;
+			T=(A+S+S2+R+15)/16*16;
 			i=A;
 			unordered_map<koopa_raw_value_t,int>().swap(f);
 		}
@@ -245,6 +245,7 @@ struct LSInterval{koopa_raw_value_t val;int def;int last_use;};
 
 static unordered_map<koopa_raw_value_t,int>lsra_def,lsra_last_use;
 static unordered_map<koopa_raw_value_t,int>lsra_alloc;
+static vector<string>used_s_regs;
 
 static void lsra_record_use(koopa_raw_value_t v,int idx)
 {
@@ -257,15 +258,16 @@ static void run_lsra()
 	vector<LSInterval>iv;
 	for(auto &p:lsra_def){auto v=p.first;int d=p.second,e=d;auto it=lsra_last_use.find(v);if(it!=lsra_last_use.end())e=it->second;iv.push_back({v,d,e});}
 	sort(iv.begin(),iv.end(),[](const LSInterval&a,const LSInterval&b){if(a.def!=b.def)return a.def<b.def;return a.last_use<b.last_use;});
+	const int N_REGS=18;
 	vector<tuple<int,koopa_raw_value_t,int>>act;
-	vector<bool>free_r(6,true);
-	vector<string>rpool={"t6","t5","t4","t3","t2","t1"};
+	vector<bool>free_r(N_REGS,true);
+	vector<string>rpool={"t6","t5","t4","t3","t2","t1","s11","s10","s9","s8","s7","s6","s5","s4","s3","s2","s1","s0"};
 	for(auto&x:iv)
 	{
 		auto v=x.val;int d=x.def,e=x.last_use;
 		auto it=act.begin();
 		while(it!=act.end()){if(get<2>(*it)<d){free_r[get<0>(*it)]=true;it=act.erase(it);}else ++it;}
-		if((int)act.size()<6){int ri=-1;for(int i=0;i<6;++i)if(free_r[i]){ri=i;break;}free_r[ri]=false;lsra_alloc[v]=ri;auto p=act.begin();while(p!=act.end()&&get<2>(*p)<e)++p;act.insert(p,{ri,v,e});}
+		if((int)act.size()<N_REGS){int ri=-1;for(int i=0;i<N_REGS;++i)if(free_r[i]){ri=i;break;}free_r[ri]=false;lsra_alloc[v]=ri;auto p=act.begin();while(p!=act.end()&&get<2>(*p)<e)++p;act.insert(p,{ri,v,e});}
 		else{int fe=get<2>(act.back());if(fe>e){int ri=get<0>(act.back());lsra_alloc.erase(get<1>(act.back()));lsra_alloc[v]=ri;act.pop_back();auto p=act.begin();while(p!=act.end()&&get<2>(*p)<e)++p;act.insert(p,{ri,v,e});}}
 	}
 }
@@ -314,7 +316,8 @@ class RegCache
 		unordered_set<koopa_raw_value_t>dirty;
 		koopa_raw_value_t last_get;
 		unordered_map<koopa_raw_value_t,int>lsra_alloc;
-		vector<string>lsra_regs={"t6","t5","t4","t3","t2","t1"};
+		vector<string>lsra_regs={"t6","t5","t4","t3","t2","t1","s11","s10","s9","s8","s7","s6","s5","s4","s3","s2","s1","s0"};
+		vector<string>saved_s;
 		void _pop_or_spill()
 		{
 			if(pool.empty())
@@ -339,7 +342,11 @@ class RegCache
 			r2v.clear();
 			dirty.clear();
 			last_get=nullptr;
-			pool={"t6","t5","t4","t3","t2","t1"};
+			saved_s=used_s_regs;
+			pool.clear();
+			for(auto &s:saved_s) if(!r2v.count(s)) pool.push_back(s);
+			pool.push_back("t6");pool.push_back("t5");pool.push_back("t4");
+			pool.push_back("t3");pool.push_back("t2");pool.push_back("t1");
 		}
 		string alloc_pool_reg()
 		{
@@ -474,12 +481,22 @@ class RegCache
 				if(dirty.count(p.second))
 					to_write.push_back(p);
 			for(const auto &p:to_write)
+			{
 				_sw(p.first,"sp",addr.query(p.second));
-			v2r.clear();
-			r2v.clear();
-			dirty.clear();
+				if(p.first[0]=='t')
+				{
+					v2r.erase(p.second);
+					r2v.erase(p.first);
+					dirty.erase(p.second);
+				}
+			}
+			for(auto &p:r2v)
+				if(p.first[0]=='t') dirty.erase(p.second);
 			last_get=nullptr;
-			pool={"t6","t5","t4","t3","t2","t1"};
+			pool.clear();
+			for(auto &s:saved_s) if(!r2v.count(s)) pool.push_back(s);
+			pool.push_back("t6");pool.push_back("t5");pool.push_back("t4");
+			pool.push_back("t3");pool.push_back("t2");pool.push_back("t1");
 		}
 		void invalidate()
 		{
@@ -487,7 +504,10 @@ class RegCache
 			r2v.clear();
 			dirty.clear();
 			last_get=nullptr;
-			pool={"t6","t5","t4","t3","t2","t1"};
+			pool.clear();
+			for(auto &s:saved_s) if(!r2v.count(s)) pool.push_back(s);
+			pool.push_back("t6");pool.push_back("t5");pool.push_back("t4");
+			pool.push_back("t3");pool.push_back("t2");pool.push_back("t1");
 		}
 };
 static RegCache rc;
@@ -565,7 +585,13 @@ void visit(const koopa_raw_function_t &func)
 	}
 	A*=4;
 	run_lsra();
-	addr.init(R,S,A);
+	{
+		used_s_regs.clear();
+		unordered_set<string>seen;
+		for(auto &p:lsra_alloc) if(p.second>=6){string r="s"+to_string(17-p.second);if(!seen.count(r)){seen.insert(r);used_s_regs.push_back(r);}}
+	}
+	int S2=used_s_regs.size()*4;
+	addr.init(R,S,A,S2);
 	unordered_map<koopa_raw_value_t,int>().swap(params_table);
 	rc.init();
 	rc.set_lsra(lsra_alloc);
@@ -575,8 +601,10 @@ void visit(const koopa_raw_function_t &func)
 		params_table[value]=i;
 	}
 	addi("sp","sp",-addr.T);
+	for(size_t i=0;i<used_s_regs.size();++i)
+		_sw(used_s_regs[i],"sp",addr.A+addr.S+(int)i*4);
 	if(R)
-		_sw("ra","sp",S+A);
+		_sw("ra","sp",addr.A+addr.S+addr.S2);
 	visit(func->bbs);
 }
 
@@ -874,7 +902,9 @@ void visit(const koopa_raw_return_t &i)
 	else
 		_li("a0",0);
 	if(addr.R)
-		_lw("ra","sp",addr.S+addr.A);
+		_lw("ra","sp",addr.A+addr.S+addr.S2);
+	for(size_t i=0;i<used_s_regs.size();++i)
+		_lw(used_s_regs[i],"sp",addr.A+addr.S+(int)i*4);
 	addi("sp","sp",addr.T);
 	_ret();
 }
