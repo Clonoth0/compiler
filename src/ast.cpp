@@ -21,6 +21,20 @@ static set<Symbol>ptr_value;
 static unordered_map<string,bool>func_table={{"main",true},{"getint",true},{"getch",true},{"getarray",true},{"putint",false},{"putch",false},{"putarray",false},{"starttime",false},{"stoptime",false}}; // int : true, void : false
 static vector<vector<pair<string,optional<Symbol>>>>symbol_stack;
 static unordered_set<string>builtin_funcs={"main","getint","getch","getarray","putint","putch","putarray","starttime","stoptime"};
+struct FuncSig
+{
+	int param_count;
+	bool returns_int;
+};
+static unordered_map<string,int>func_id;
+static unordered_map<string,int>func_symbol_val;
+static unordered_map<string,FuncSig>func_sigs;
+static int next_func_id=0;
+static int next_lambda_id=0;
+static vector<const LambdaExpAST*>pending_lambdas;
+static unordered_map<string,bool>closure_has_self;
+static unordered_set<string>self_params;
+static string current_lambda_func_name;
 static int if_total=0,while_total=0,ex_total=0; // basic block
 static bool need_jump=false,need_ex=false;
 static vector<int>while_stack;
@@ -69,6 +83,14 @@ static Symbol _alloc()
 	check_ex();
 	Symbol symbol(true,_total++);
 	out<<"\t"<<symbol<<" = alloc i32\n";
+	need_jump=true;
+	return symbol;
+}
+static Symbol _alloc_ptr()
+{
+	check_ex();
+	Symbol symbol(true,_total++);
+	out<<"\t"<<symbol<<" = alloc *i32\n";
 	need_jump=true;
 	return symbol;
 }
@@ -235,15 +257,179 @@ Result ProgramAST::print()const
 {
 	if(debug_flag)
 		out<<"Program :\n";
+	for(const auto &def:*defs)
+		def->pre_register();
+	for(int n=0;n<=8;++n)
+	{
+		out<<"decl @__fp_"<<n<<"_i32(i32";
+		for(int j=0;j<n;++j)
+			out<<", i32";
+		out<<"): i32\n";
+		out<<"decl @__fp_"<<n<<"_void(i32";
+		for(int j=0;j<n;++j)
+			out<<", i32";
+		out<<")\n";
+	}
 	symbol_stack.push_back({});
+	auto emit=[&](bool fp)
+	{
+		for(const auto &def:*defs)
+		{
+			if(def->has_func_ptr_params()==fp)
+			{
+				auto fd=dynamic_cast<FuncDefAST*>(def.get());
+				if(fd&&fd->ident=="main")
+					continue;
+				if(fd&&!builtin_funcs.count(fd->ident))
+					func_id[fd->ident]=next_func_id++;
+				is_global=true;
+				def->print();
+			}
+		}
+	};
+	emit(false);
+	emit(true);
 	for(const auto &def:*defs)
 	{
-		is_global=true;
-		def->print();
+		auto fd=dynamic_cast<FuncDefAST*>(def.get());
+		if(fd&&fd->ident=="main")
+		{
+			is_global=true;
+			def->print();
+		}
 	}
+	for(size_t i=0;i<pending_lambdas.size();++i)
+		pending_lambdas[i]->print_body();
 	return Result();
 }
 static vector<pair<Symbol,bool>>def_params; // ptr : true, value : false
+void FuncDefAST::pre_register()const
+{
+	func_sigs[ident]={(int)params->size(),!type.empty()};
+	if(!builtin_funcs.count(ident))
+	{
+		if(type.empty())
+			func_table[ident]=false;
+		else
+			func_table[ident]=true;
+		Symbol now(true,_total++);
+		symbol_table[ident]=now;
+		func_symbol_val[ident]=now.value;
+	}
+}
+bool FuncDefAST::has_func_ptr_params()const
+{
+	for(const auto &param:*params)
+		if(param->is_func_ptr_param())
+			return true;
+	return false;
+}
+void LambdaExpAST::pre_register()const
+{
+	if(!lambda_name.empty())
+		return;
+	lambda_name="__lambda_"+to_string(next_lambda_id++);
+	has_self=false;
+	self_name="";
+	int user_count=0;
+	for(const auto &p:*params)
+	{
+		auto lp=dynamic_cast<LambdaParamAST*>(p.get());
+		if(lp->is_self)
+		{
+			has_self=true;
+			self_name=lp->ident;
+		}
+		else
+			++user_count;
+	}
+	int total_params=user_count+(has_self?1:0);
+	func_id[lambda_name]=next_func_id++;
+	func_sigs[lambda_name]={total_params,!type.empty()};
+	func_table[lambda_name]=!type.empty();
+	if(!builtin_funcs.count(lambda_name))
+	{
+		Symbol now(true,_total++);
+		symbol_table[lambda_name]=now;
+		func_symbol_val[lambda_name]=now.value;
+	}
+	pending_lambdas.push_back(this);
+}
+Result LambdaExpAST::print()const
+{
+	if(lambda_name.empty())
+		pre_register();
+	return Result(true,func_id[lambda_name]);
+}
+void LambdaExpAST::print_body()const
+{
+	current_lambda_func_name=lambda_name;
+	string ret_str=type.empty()?"":": i32";
+	vector<pair<string,Symbol>>user_param_syms;
+	out<<"fun "<<string(Symbol(true,func_symbol_val[lambda_name]))<<"(";
+	bool first=true;
+	Symbol self_param_sym;
+	if(has_self)
+	{
+		self_param_sym=Symbol(true,_total++);
+		out<<self_param_sym<<"_: i32";
+		first=false;
+	}
+	for(const auto &p:*params)
+	{
+		auto lp=dynamic_cast<LambdaParamAST*>(p.get());
+		if(lp->is_self)
+			continue;
+		if(!first)
+			out<<", ";
+		first=false;
+		Symbol now(true,_total++);
+		symbol_insert(lp->ident,now);
+		out<<now<<"_: i32";
+	}
+	out<<")"<<type<<" {\n";
+	string entry_label=string(Symbol(true,func_symbol_val[lambda_name]));
+	entry_label.erase(entry_label.begin());
+	symbol_stack.push_back({});
+	add_basic_block("%entry_"+entry_label);
+	first_block=true;
+	if(has_self)
+	{
+		Symbol self_sym(true,_total++);
+		symbol_insert(self_name,self_sym);
+		out<<"\t"<<self_sym<<" = alloc i32\n";
+		out<<"\tstore "<<self_param_sym<<"_, "<<self_sym<<"\n";
+	}
+	for(const auto &p:*params)
+	{
+		auto lp=dynamic_cast<LambdaParamAST*>(p.get());
+		if(lp->is_self)
+			continue;
+		auto it=symbol_table.find(lp->ident);
+		assert(it!=symbol_table.end());
+		Symbol now=it->second;
+		out<<"\t"<<now<<" = alloc i32\n";
+		out<<"\tstore "<<now<<"_, "<<now<<"\n";
+	}
+	first_block=false;
+	self_params.clear();
+	if(has_self)
+		self_params.insert(self_name);
+	block->print();
+	self_params.clear();
+	if(need_jump)
+	{
+		if(type.empty())
+			out<<"\tret\n";
+		else
+			out<<"\tret 0\n";
+		need_jump=false;
+	}
+	out<<"}\n";
+	for(const auto &[ident,symbol]:symbol_stack.back())
+		symbol_reset(ident,symbol);
+	symbol_stack.pop_back();
+}
 Result FuncDefAST::print()const
 {
 	if(debug_flag)
@@ -258,11 +444,7 @@ Result FuncDefAST::print()const
 	if(builtin_funcs.count(ident))
 		str="@"+ident;
 	else
-	{
-		Symbol now(true,_total++);
-		symbol_table[ident]=now;
-		str=now;
-	}
+		str=symbol_table[ident];
 	out<<"fun "<<str<<"(";
 	bool first=true;
 	def_params.clear();
@@ -313,6 +495,11 @@ Result FuncFParamAST::print()const
 		symbol_size[now]=array_size;
 		ptr_value.insert(now);
 		out<<now<<"_: *i32";
+	}
+	else if(func_ptr)
+	{
+		def_params.emplace_back(now,false);
+		out<<now<<"_: i32";
 	}
 	else
 	{
@@ -533,6 +720,16 @@ Result VarDefAST::print()const
 {
 	if(debug_flag)
 		out<<"VarDef :\n";
+	if(is_auto)
+	{
+		auto lambda=dynamic_cast<LambdaExpAST*>((*init).get());
+		Symbol now=_alloc();
+		Result fid=(*init)->print();
+		_store(fid,now);
+		symbol_insert(ident,now);
+		closure_has_self[ident]=lambda->has_self;
+		return fid;
+	}
 	if(exps->empty())
 	{
 		if(is_global)
@@ -672,6 +869,12 @@ Result LValAST::print()const
 	auto now=symbol_table[ident];
 	if(exps->empty())
 	{
+		auto fit=func_symbol_val.find(ident);
+		if(fit!=func_symbol_val.end()&&now.value==fit->second)
+		{
+			lval_ptr=false;
+			return Result(true,func_id[ident]);
+		}
 		if(symbol_size.count(now))
 		{
 			lval_ptr=true;
@@ -729,39 +932,145 @@ Result UnaryExpAST::print()const
 		out<<"UnaryExp :\n";
 	if(func)
 	{
-		assert(op.has_value());
-		string str;
-		if(builtin_funcs.count(*op))
-			str="@"+*op;
-		else
-			str=symbol_table[*op];
 		int size=params->size();
 		vector<Result>result(size);
 		for(int i=0;i<size;++i)
 			result[i]=(*params)[i]->print();
-		if(func_table[*op])
+		bool is_direct=false;
+		string target_func;
+		bool returns_int=true;
+		if(fname.has_value())
+		{
+			auto it=symbol_table.find(*fname);
+			auto fit=func_symbol_val.find(*fname);
+			if(builtin_funcs.count(*fname)||(it!=symbol_table.end()&&fit!=func_symbol_val.end()&&it->second.value==fit->second))
+			{
+				is_direct=true;
+				target_func=*fname;
+				returns_int=func_table[*fname];
+			}
+		}
+		if(is_direct)
+		{
+			string str;
+			if(builtin_funcs.count(target_func))
+				str="@"+target_func;
+			else
+				str=symbol_table[target_func];
+			if(returns_int)
+			{
+				Result now(false,_total++);
+				out<<"\t"<<now<<" = call "<<str<<"(";
+				for(int i=0;i<size;++i)
+				{
+					if(i)
+						out<<", ";
+					out<<result[i];
+				}
+				out<<")\n";
+				return now;
+			}
+			else
+			{
+				out<<"\tcall "<<str<<"(";
+				for(int i=0;i<size;++i)
+				{
+					if(i)
+						out<<", ";
+					out<<result[i];
+				}
+				out<<")\n";
+				return Result();
+			}
+		}
+		if(fname.has_value()&&self_params.count(*fname))
+		{
+			Symbol self_sym=symbol_table[*fname];
+			Result self_val=_load(self_sym);
+			string lambda_sym=string(Symbol(true,func_symbol_val[current_lambda_func_name]));
+			returns_int=!func_table[current_lambda_func_name]?false:true;
+			check_ex();
+			if(returns_int)
+			{
+				Result now(false,_total++);
+				out<<"\t"<<now<<" = call "<<lambda_sym<<"(";
+				out<<self_val;
+				for(int i=1;i<size;++i) out<<", "<<result[i];
+				out<<")\n";
+				need_jump=true;
+				return now;
+			}
+			else
+			{
+				out<<"\tcall "<<lambda_sym<<"(";
+				out<<self_val;
+				for(int i=1;i<size;++i) out<<", "<<result[i];
+				out<<")\n";
+				need_jump=true;
+				return Result();
+			}
+		}
+		Result callee_val;
+		if(fname.has_value())
+		{
+			auto sym=symbol_table[*fname];
+			callee_val=_load(sym);
+		}
+		else
+			callee_val=exp->print();
+		{
+			bool has_int=false,has_void=false;
+			for(auto &[fn,sig]:func_sigs)
+			{
+				if(builtin_funcs.count(fn))
+					continue;
+				if(sig.param_count!=size)
+					continue;
+				if(sig.returns_int)
+					has_int=true;
+				else
+					has_void=true;
+			}
+			if(has_int)
+				returns_int=true;
+			else if(has_void)
+				returns_int=false;
+			else
+				returns_int=true;
+		}
+		string ret_str=returns_int?"i32":"void";
+		int extra_args=0;
+		string self_str;
+		if(fname.has_value()&&closure_has_self.count(*fname)&&closure_has_self[*fname])
+		{
+			extra_args=1;
+			self_str="0";
+		}
+		string sentinel="@__fp_"+to_string(size)+"_"+ret_str;
+		check_ex();
+		if(returns_int)
 		{
 			Result now(false,_total++);
-			out<<"\t"<<now<<" = call "<<str<<"(";
-			for(int i=0;i<size;++i)
-			{
-				if(i)
-					out<<", ";
-				out<<result[i];
-			}
+			out<<"\t"<<now<<" = call "<<sentinel<<"(";
+			out<<callee_val;
+			if(extra_args)
+				out<<", "<<self_str;
+			for(int i=extra_args;i<size;++i)
+				out<<", "<<result[i];
 			out<<")\n";
+			need_jump=true;
 			return now;
 		}
 		else
 		{
-			out<<"\tcall "<<str<<"(";
-			for(int i=0;i<size;++i)
-			{
-				if(i)
-					out<<", ";
-				out<<result[i];
-			}
+			out<<"\tcall "<<sentinel<<"(";
+			out<<callee_val;
+			if(extra_args)
+				out<<", "<<self_str;
+			for(int i=extra_args;i<size;++i)
+				out<<", "<<result[i];
 			out<<")\n";
+			need_jump=true;
 			return Result();
 		}
 	}

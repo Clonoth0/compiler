@@ -1,0 +1,11 @@
+int sub(int a,int b){return a-b;}
+int main()
+{
+	int (*p)(int,int);
+	auto add=[](int a,int b)->int{return a+b;};
+	p=add;
+	int x=p(10,5);
+	p=sub;
+	int y=p(10,5);
+	return x+y;
+}

@@ -1,0 +1,20 @@
+int add(int a,int b)
+{
+	return a+b;
+}
+int apply(int (*op)(int,int),int x,int y)
+{
+	return op(x,y);
+}
+int main()
+{
+	auto add=[](int x,int y)->int
+	{
+		auto add=[](int p)->int
+		{
+			return p*2;
+		};
+		return add(x+y+1);
+	};
+	return apply(add,2,3);
+}

@@ -1,0 +1,7 @@
+int main()
+{
+	return [](int x,int y)->int
+	{
+		return x*y;
+	}(6,7);
+}

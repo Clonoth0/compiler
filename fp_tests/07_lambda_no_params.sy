@@ -1,0 +1,8 @@
+int main()
+{
+	auto p=[]()->int
+	{
+		return 42;
+	};
+	return p();
+}

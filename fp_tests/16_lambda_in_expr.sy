@@ -1,0 +1,8 @@
+int main()
+{
+	auto f=[](int x)->int{return x+10;};
+	auto g=[](int x)->int{return x*3;};
+	int a=f(2);
+	int b=g(a);
+	return a+b;
+}

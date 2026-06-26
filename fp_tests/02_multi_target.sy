@@ -1,0 +1,10 @@
+int add(int a, int b) { return a + b; }
+int mul(int a, int b) { return a * b; }
+int apply(int (*op)(int, int), int x, int y)
+{
+	return op(x, y);
+}
+int main()
+{
+	return apply(add, 2, 3) + apply(mul, 4, 5);
+}

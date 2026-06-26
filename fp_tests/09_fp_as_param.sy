@@ -1,0 +1,14 @@
+int apply(int (*f)(int,int),int x,int y)
+{
+	return f(x,y);
+}
+int add(int a,int b)
+{
+	return a+b;
+}
+int main()
+{
+	int (*p)(int,int);
+	p=add;
+	return apply(p,10,20);
+}

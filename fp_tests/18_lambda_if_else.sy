@@ -1,0 +1,11 @@
+int main()
+{
+	auto max=[](int a,int b)->int
+	{
+		if(a<b)
+			return b;
+		else
+			return a;
+	};
+	return max(7,9);
+}

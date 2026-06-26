@@ -1,0 +1,10 @@
+int main()
+{
+	auto gcd=[](auto &self,int a,int b)->int
+	{
+		if(!b)
+			return a;
+		return self(self,b,a%b);
+	};
+	return gcd(gcd,48,18);
+}

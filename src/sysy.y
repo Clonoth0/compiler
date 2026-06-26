@@ -7,6 +7,7 @@
 
 %{
 
+#include<cassert>
 #include<iostream>
 #include<memory>
 #include<string>
@@ -36,13 +37,14 @@ using namespace std;
 	vector<node> *vec_val;
 }
 
-%token VOID INT RETURN CONST IF ELSE WHILE BREAK CONTINUE
+%token VOID INT RETURN CONST IF ELSE WHILE BREAK CONTINUE AUTO
+%token ARROW
 %token <str_val> IDENT EQOP RELOP ADDOP NOTOP MULOP ANDOP OROP 
 %token <int_val> INT_CONST
 
-%type <vec_val> CompUnit ExConstDef ExVarDef ExBlockItem FuncFParams FuncRParams
-%type <vec_val> ExExp ExInitVal
-%type <ast_val> FuncDef FuncFParam
+%type <vec_val> CompUnit ExConstDef ExVarDef ExBlockItem FuncFParams FuncRParams FuncFPTypes
+%type <vec_val> ExExp ExInitVal LambdaParams
+%type <ast_val> FuncDef FuncFParam LambdaParam LambdaExp
 %type <ast_val> Decl ConstDecl ConstDef VarDecl VarDef InitVal
 %type <ast_val> Block BlockItem
 %type <ast_val> Stmt MatchedStmt DanglingStmt
@@ -120,6 +122,19 @@ VarDecl : INT VarDef ExVarDef ';'
 	ast->defs=unique_ptr<vector<node>>($3);
 	ast->defs->insert(ast->defs->begin(),node($2));
 	$$=ast;
+} | AUTO IDENT '=' LambdaExp ';'
+{
+	auto ast=new VarDeclAST;
+	auto defs=new vector<node>;
+	auto vd=new VarDefAST;
+	vd->ident=*unique_ptr<string>($2);
+	vd->exps=make_unique<vector<node>>();
+	vd->init=node($4);
+	vd->func_ptr=false;
+	vd->is_auto=true;
+	defs->push_back(node(vd));
+	ast->defs=unique_ptr<vector<node>>(defs);
+	$$=ast;
 };
 
 ExVarDef : 
@@ -139,6 +154,7 @@ VarDef : IDENT ExExp
 	ast->ident=*unique_ptr<string>($1);
 	ast->exps=unique_ptr<vector<node>>($2);
 	ast->init=nullopt;
+	ast->func_ptr=false;
 	$$=ast;
 } | IDENT ExExp '=' InitVal
 {
@@ -146,6 +162,56 @@ VarDef : IDENT ExExp
 	ast->ident=*unique_ptr<string>($1);
 	ast->exps=unique_ptr<vector<node>>($2);
 	ast->init=node($4);
+	ast->func_ptr=false;
+	$$=ast;
+} | '(' MULOP IDENT ')' '(' FuncFPTypes ')'
+{
+	assert(*$2=="*");
+	auto ast=new VarDefAST;
+	ast->ident=*unique_ptr<string>($3);
+	ast->exps=make_unique<vector<node>>();
+	ast->init=nullopt;
+	ast->func_ptr=true;
+	ast->inner_params=unique_ptr<vector<node>>($6);
+	$$=ast;
+} | '(' MULOP IDENT ')' '(' ')' 
+{
+	assert(*$2=="*");
+	auto ast=new VarDefAST;
+	ast->ident=*unique_ptr<string>($3);
+	ast->exps=make_unique<vector<node>>();
+	ast->init=nullopt;
+	ast->func_ptr=true;
+	ast->inner_params=make_unique<vector<node>>();
+	$$=ast;
+} | '(' MULOP IDENT ')' '(' FuncFPTypes ')' '=' InitVal
+{
+	assert(*$2=="*");
+	auto ast=new VarDefAST;
+	ast->ident=*unique_ptr<string>($3);
+	ast->exps=make_unique<vector<node>>();
+	ast->init=node($9);
+	ast->func_ptr=true;
+	ast->inner_params=unique_ptr<vector<node>>($6);
+	$$=ast;
+} | '(' MULOP IDENT ')' '(' ')' '=' InitVal
+{
+	assert(*$2=="*");
+	auto ast=new VarDefAST;
+	ast->ident=*unique_ptr<string>($3);
+	ast->exps=make_unique<vector<node>>();
+	ast->init=node($8);
+	ast->func_ptr=true;
+	ast->inner_params=make_unique<vector<node>>();
+	$$=ast;
+} | AUTO IDENT '=' LambdaExp
+{
+	auto ast=new VarDefAST;
+	ast->ident=*unique_ptr<string>($2);
+	ast->exps=make_unique<vector<node>>();
+	ast->init=node($4);
+	ast->func_ptr=false;
+	ast->is_auto=true;
 	$$=ast;
 };
 
@@ -233,6 +299,7 @@ FuncFParam : INT IDENT
 	auto ast=new FuncFParamAST;
 	ast->ident=*unique_ptr<string>($2);
 	ast->ptr=false;
+	ast->func_ptr=false;
 	$$=ast;
 } | INT IDENT '[' ']' ExExp
 {
@@ -240,6 +307,83 @@ FuncFParam : INT IDENT
 	ast->ident=*unique_ptr<string>($2);
 	ast->exps=unique_ptr<vector<node>>($5);
 	ast->ptr=true;
+	ast->func_ptr=false;
+	$$=ast;
+} | INT '(' MULOP IDENT ')' '(' FuncFPTypes ')'
+{
+	assert(*$3=="*");
+	auto ast=new FuncFParamAST;
+	ast->ident=*unique_ptr<string>($4);
+	ast->ptr=false;
+	ast->func_ptr=true;
+	ast->inner_params=unique_ptr<vector<node>>($7);
+	$$=ast;
+} | INT '(' MULOP IDENT ')' '(' ')'
+{
+	assert(*$3=="*");
+	auto ast=new FuncFParamAST;
+	ast->ident=*unique_ptr<string>($4);
+	ast->ptr=false;
+	ast->func_ptr=true;
+	ast->inner_params=make_unique<vector<node>>();
+	$$=ast;
+};
+
+FuncFPTypes : INT
+{
+	auto params=new vector<node>;
+	params->push_back(node());
+	$$=params;
+} | FuncFPTypes ',' INT
+{
+	auto params=$1;
+	params->push_back(node());
+	$$=params;
+};
+
+LambdaExp : '[' ']' '(' LambdaParams ')' ARROW INT Block
+{
+	auto ast=new LambdaExpAST;
+	ast->type=" : i32";
+	ast->params=unique_ptr<vector<node>>($4);
+	ast->block=node($8);
+	$$=ast;
+} | '[' ']' '(' LambdaParams ')' ARROW VOID Block
+{
+	auto ast=new LambdaExpAST;
+	ast->type="";
+	ast->params=unique_ptr<vector<node>>($4);
+	ast->block=node($8);
+	$$=ast;
+};
+
+LambdaParams :
+{
+	auto params=new vector<node>;
+	$$=params;
+} | LambdaParam
+{
+	auto params=new vector<node>;
+	params->push_back(node($1));
+	$$=params;
+} | LambdaParams ',' LambdaParam
+{
+	auto params=$1;
+	params->push_back(node($3));
+	$$=params;
+};
+
+LambdaParam : AUTO '&' IDENT
+{
+	auto ast=new LambdaParamAST;
+	ast->ident=*unique_ptr<string>($3);
+	ast->is_self=true;
+	$$=ast;
+} | INT IDENT
+{
+	auto ast=new LambdaParamAST;
+	ast->ident=*unique_ptr<string>($2);
+	ast->is_self=false;
 	$$=ast;
 };
 
@@ -441,6 +585,9 @@ PrimaryExp : '(' Exp ')'
 	ast->lval=nullopt;
 	ast->number=$1;
 	$$=ast;
+} | LambdaExp
+{
+	$$=$1;
 };
 
 UnaryExp : PrimaryExp
@@ -467,14 +614,29 @@ UnaryExp : PrimaryExp
 } | IDENT '(' ')'
 {
 	auto ast=new UnaryExpAST;
-	ast->op=*unique_ptr<string>($1);
+	ast->fname=*unique_ptr<string>($1);
 	ast->params=make_unique<vector<node>>();
 	ast->func=true;
 	$$=ast;
 } | IDENT '(' Exp FuncRParams ')'
 {
 	auto ast=new UnaryExpAST;
-	ast->op=*unique_ptr<string>($1);
+	ast->fname=*unique_ptr<string>($1);
+	ast->params=unique_ptr<vector<node>>($4);
+	ast->params->insert(ast->params->begin(),node($3));
+	ast->func=true;
+	$$=ast;
+} | PrimaryExp '(' ')'
+{
+	auto ast=new UnaryExpAST;
+	ast->exp=node($1);
+	ast->params=make_unique<vector<node>>();
+	ast->func=true;
+	$$=ast;
+} | PrimaryExp '(' Exp FuncRParams ')'
+{
+	auto ast=new UnaryExpAST;
+	ast->exp=node($1);
 	ast->params=unique_ptr<vector<node>>($4);
 	ast->params->insert(ast->params->begin(),node($3));
 	ast->func=true;

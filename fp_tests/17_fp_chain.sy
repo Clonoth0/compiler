@@ -1,0 +1,15 @@
+int add(int a,int b){return a+b;}
+int mul(int a,int b){return a*b;}
+int dispatch(int (*f)(int,int),int x,int y)
+{
+	return f(x,y);
+}
+int main()
+{
+	int (*p)(int,int);
+	p=add;
+	int a=dispatch(p,2,3);
+	p=mul;
+	int b=dispatch(p,4,5);
+	return a+b;
+}

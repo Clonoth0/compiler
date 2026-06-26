@@ -1,0 +1,10 @@
+int main()
+{
+	auto fib=[](auto &self,int n)->int
+	{
+		if(n<=1)
+			return n;
+		return self(self,n-1)+self(self,n-2);
+	};
+	return fib(fib,10);
+}

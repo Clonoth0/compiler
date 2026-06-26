@@ -1,0 +1,10 @@
+int main()
+{
+	auto loop=[](auto &self,int n,int init)->int
+	{
+		if(!n)
+			return init;
+		return self(self,n-1,init+1);
+	};
+	return loop(loop,10,0);
+}

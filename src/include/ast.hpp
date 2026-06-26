@@ -110,6 +110,9 @@ class BaseAST
 {
 	public:
 		virtual ~BaseAST()=default;
+		virtual void pre_register()const{}
+		virtual bool is_func_ptr_param()const{return false;}
+		virtual bool has_func_ptr_params()const{return false;}
 		virtual Result print()const=0;
 };
 using node=unique_ptr<BaseAST>;
@@ -126,6 +129,8 @@ class FuncDefAST:public BaseAST
 		string ident;
 		node block;
 		unique_ptr<vector<node>>params;
+		bool has_func_ptr_params()const override;
+		void pre_register()const override;
 		Result print()const override;
 };
 class FuncFParamAST:public BaseAST
@@ -134,6 +139,9 @@ class FuncFParamAST:public BaseAST
 		string ident;
 		unique_ptr<vector<node>>exps;
 		bool ptr;
+		bool func_ptr;
+		unique_ptr<vector<node>>inner_params;
+		bool is_func_ptr_param()const override{return func_ptr;}
 		Result print()const override;
 };
 class BlockAST:public BaseAST
@@ -203,6 +211,9 @@ class VarDefAST:public BaseAST
 		string ident;
 		unique_ptr<vector<node>>exps;
 		optional<node>init;
+		bool func_ptr;
+		unique_ptr<vector<node>>inner_params;
+		bool is_auto;
 		Result print()const override;
 };
 class InitValAST:public BaseAST
@@ -215,6 +226,26 @@ class InitValAST:public BaseAST
 
 
 
+class LambdaParamAST:public BaseAST
+{
+	public:
+		string ident;
+		bool is_self;
+		Result print()const override{return Result();}
+};
+class LambdaExpAST:public BaseAST
+{
+	public:
+		unique_ptr<vector<node>>params;
+		string type;
+		node block;
+		mutable string lambda_name;
+		mutable bool has_self;
+		mutable string self_name;
+		void pre_register()const override;
+		Result print()const override;
+		void print_body()const;
+};
 class ExpAST:public BaseAST
 {
 	public:
@@ -232,6 +263,7 @@ class UnaryExpAST:public BaseAST
 {
 	public:
 		optional<string>op;
+		optional<string>fname;
 		node exp;
 		unique_ptr<vector<node>>params;
 		bool func;

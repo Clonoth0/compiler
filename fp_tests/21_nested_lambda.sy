@@ -1,0 +1,11 @@
+int main()
+{
+	return [](int a,int b)->int
+	{
+		auto add=[](int p)->int
+		{
+			return p+1;
+		};
+		return add(a+b);
+	}(3,4);
+}

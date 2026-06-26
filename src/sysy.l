@@ -53,6 +53,7 @@ OROP			("||")
 "while"			{ return WHILE; }
 "break"			{ return BREAK; }
 "continue"		{ return CONTINUE; }
+"auto"			{ return AUTO; }
 
 {Identifier}	{ yylval.str_val = new string(yytext); return IDENT; }
 
@@ -60,6 +61,7 @@ OROP			("||")
 {Octal}			{ yylval.int_val = strtol(yytext, nullptr, 0); return INT_CONST; }
 {Hexadecimal}	{ yylval.int_val = strtol(yytext, nullptr, 0); return INT_CONST; }
 
+"->"			{ return ARROW; }
 {EQOP}			{ yylval.str_val = new string(yytext); return EQOP; }
 {RELOP}			{ yylval.str_val = new string(yytext); return RELOP; }
 {ADDOP}			{ yylval.str_val = new string(yytext); return ADDOP; }

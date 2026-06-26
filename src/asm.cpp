@@ -25,6 +25,18 @@ static void _word(const int &value)
 	_clear_peep();
 	cout<<"\t.word "<<value<<"\n";
 }
+static void _word_label(const string &label)
+{
+	_clear_peep();
+	cout<<"\t.word "<<label<<"\n";
+}
+static unordered_set<string>builtin_funcs_s={"main","getint","getch","getarray","putint","putch","putarray","starttime","stoptime"};
+static bool is_builtin_func(const string &name)
+{
+	if(name.find("__fp_")==0)
+		return true;
+	return builtin_funcs_s.count(name);
+}
 static void _ret()
 {
 	_clear_peep();
@@ -518,6 +530,23 @@ void visit(const koopa_raw_program_t &program)
 	_clear_peep();
 	cout<<"\t.data\n";
 	visit(program.values);
+	{
+		vector<string>fp_labels;
+		for(size_t i=0;i<program.funcs.len;++i)
+		{
+			auto func=reinterpret_cast<koopa_raw_function_t>(program.funcs.buffer[i]);
+			string name=func->name+1;
+			if(!is_builtin_func(name))
+				fp_labels.push_back(name);
+		}
+		if(!fp_labels.empty())
+		{
+			cout<<"\n\t.align 2\n";
+			cout<<"__fp_table:\n";
+			for(auto &label:fp_labels)
+				_word_label(label);
+		}
+	}
 	_clear_peep();
 	cout<<"\n\t.text\n";
 	visit(program.funcs);
@@ -867,6 +896,59 @@ void visit(const koopa_raw_jump_t &i)
 void visit(const koopa_raw_call_t &i,const koopa_raw_value_t &value)
 {
 	rc.flush_all();
+	string callee_name=i.callee->name;
+	if(callee_name.find("@__fp_")==0)
+	{
+		int len=i.args.len;
+		bool ret_int=value->ty->tag!=KOOPA_RTT_UNIT;
+		{
+			auto func_id_val=reinterpret_cast<koopa_raw_value_t>(i.args.buffer[0]);
+			string cached=rc.find_reg(func_id_val);
+			if(!cached.empty())
+				_mv("t0",cached);
+			else
+				load("t0",func_id_val);
+		}
+		for(int j=1;j<len;++j)
+		{
+			auto val=reinterpret_cast<koopa_raw_value_t>(i.args.buffer[j]);
+			int real_j=j-1;
+			if(real_j<8)
+			{
+				string cached=rc.find_reg(val);
+				if(!cached.empty())
+					_mv("a"+to_string(real_j),cached);
+				else
+					load("a"+to_string(real_j),val);
+			}
+			else
+			{
+				string cached=rc.find_reg(val);
+				if(!cached.empty())
+					_mv("t1",cached);
+				else
+					load("t1",val);
+				_sw("t1","sp",(real_j-8)*4);
+			}
+		}
+		_clear_peep();
+		cout<<"\tslli t1, t0, 2\n";
+		_clear_peep();
+		cout<<"\tla t2, __fp_table\n";
+		_clear_peep();
+		cout<<"\tadd t2, t2, t1\n";
+		_clear_peep();
+		cout<<"\tlw t2, 0(t2)\n";
+		_clear_peep();
+		cout<<"\tjalr ra, t2, 0\n";
+		if(ret_int)
+		{
+			string result_reg=rc.alloc_pool_reg();
+			_mv(result_reg,"a0");
+			rc.set(value,result_reg);
+		}
+		return;
+	}
 	int len=i.args.len;
 	for(int j=0;j<len;++j)
 	{
