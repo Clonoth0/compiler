@@ -1,0 +1,13 @@
+int five()
+{
+	return 5;
+}
+int call_zero(int (*f)())
+{
+	return f();
+}
+int main()
+{
+	auto ten=[]()->int{return 10;};
+	return call_zero(five)+call_zero(ten);
+}

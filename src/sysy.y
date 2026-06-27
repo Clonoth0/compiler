@@ -344,6 +344,7 @@ FuncFPTypes : INT
 LambdaExp : '[' ']' '(' LambdaParams ')' ARROW INT Block
 {
 	auto ast=new LambdaExpAST;
+	ast->cap_ref=false; ast->cap_val=false;
 	ast->type=" : i32";
 	ast->params=unique_ptr<vector<node>>($4);
 	ast->block=node($8);
@@ -351,9 +352,42 @@ LambdaExp : '[' ']' '(' LambdaParams ')' ARROW INT Block
 } | '[' ']' '(' LambdaParams ')' ARROW VOID Block
 {
 	auto ast=new LambdaExpAST;
+	ast->cap_ref=false; ast->cap_val=false;
 	ast->type="";
 	ast->params=unique_ptr<vector<node>>($4);
 	ast->block=node($8);
+	$$=ast;
+} | '[' '&' ']' '(' LambdaParams ')' ARROW INT Block
+{
+	auto ast=new LambdaExpAST;
+	ast->cap_ref=true; ast->cap_val=false;
+	ast->type=" : i32";
+	ast->params=unique_ptr<vector<node>>($5);
+	ast->block=node($9);
+	$$=ast;
+} | '[' '&' ']' '(' LambdaParams ')' ARROW VOID Block
+{
+	auto ast=new LambdaExpAST;
+	ast->cap_ref=true; ast->cap_val=false;
+	ast->type="";
+	ast->params=unique_ptr<vector<node>>($5);
+	ast->block=node($9);
+	$$=ast;
+} | '[' '=' ']' '(' LambdaParams ')' ARROW INT Block
+{
+	auto ast=new LambdaExpAST;
+	ast->cap_ref=false; ast->cap_val=true;
+	ast->type=" : i32";
+	ast->params=unique_ptr<vector<node>>($5);
+	ast->block=node($9);
+	$$=ast;
+} | '[' '=' ']' '(' LambdaParams ')' ARROW VOID Block
+{
+	auto ast=new LambdaExpAST;
+	ast->cap_ref=false; ast->cap_val=true;
+	ast->type="";
+	ast->params=unique_ptr<vector<node>>($5);
+	ast->block=node($9);
 	$$=ast;
 };
 
@@ -385,6 +419,22 @@ LambdaParam : AUTO '&' IDENT
 	ast->ident=*unique_ptr<string>($2);
 	ast->is_self=false;
 	$$=ast;
+} | INT '(' MULOP IDENT ')' '(' FuncFPTypes ')'
+{
+	assert(*$3=="*");
+	auto lp=new LambdaParamAST;
+	lp->ident=*unique_ptr<string>($4);
+	lp->is_self=false;
+	lp->is_fp=true;
+	$$=lp;
+} | INT '(' MULOP IDENT ')' '(' ')'
+{
+	assert(*$3=="*");
+	auto lp=new LambdaParamAST;
+	lp->ident=*unique_ptr<string>($4);
+	lp->is_self=false;
+	lp->is_fp=true;
+	$$=lp;
 };
 
 Block : '{' ExBlockItem '}'

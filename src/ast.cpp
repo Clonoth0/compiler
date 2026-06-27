@@ -32,9 +32,14 @@ static unordered_map<string,FuncSig>func_sigs;
 static int next_func_id=0;
 static int next_lambda_id=0;
 static vector<const LambdaExpAST*>pending_lambdas;
-static unordered_map<string,bool>closure_has_self;
+static unordered_map<string,ClosureLayout>closure_layouts;
 static unordered_set<string>self_params;
 static string current_lambda_func_name;
+static int MAX_CAPTURES=0;
+static int next_thunk_id=0;
+static bool in_auto_def=false;
+struct ThunkInfo{string thunk_name;string real_lambda_name;vector<string>capture_names;int user_param_count;int cap_count;string ret_type;};
+static vector<ThunkInfo>pending_thunks;
 static int if_total=0,while_total=0,ex_total=0; // basic block
 static bool need_jump=false,need_ex=false;
 static vector<int>while_stack;
@@ -324,6 +329,67 @@ bool FuncDefAST::has_func_ptr_params()const
 			return true;
 	return false;
 }
+static void walk_ast(const node &n,unordered_set<string>&found)
+{
+	if(!n) return;
+	if(auto lv=dynamic_cast<LValAST*>(n.get())){found.insert(lv->ident);return;}
+	if(auto p=dynamic_cast<PrimaryExpAST*>(n.get())){if(p->lval.has_value())walk_ast(*p->lval,found);else if(p->exp)walk_ast(p->exp,found);return;}
+	if(auto u=dynamic_cast<UnaryExpAST*>(n.get())){if(u->func){if(u->params)for(auto &x:*u->params)walk_ast(x,found);}else if(u->exp)walk_ast(u->exp,found);return;}
+	if(auto b=dynamic_cast<MulExpAST*>(n.get())){walk_ast(b->unary_exp,found);if(b->value.has_value())walk_ast(b->value->first,found);return;}
+	if(auto a=dynamic_cast<AddExpAST*>(n.get())){walk_ast(a->mul_exp,found);if(a->value.has_value())walk_ast(a->value->first,found);return;}
+	if(auto r=dynamic_cast<RelExpAST*>(n.get())){walk_ast(r->add_exp,found);if(r->value.has_value())walk_ast(r->value->first,found);return;}
+	if(auto e=dynamic_cast<EqExpAST*>(n.get())){walk_ast(e->rel_exp,found);if(e->value.has_value())walk_ast(e->value->first,found);return;}
+	if(auto nd=dynamic_cast<AndExpAST*>(n.get())){walk_ast(nd->eq_exp,found);if(nd->value.has_value())walk_ast(nd->value->first,found);return;}
+	if(auto o=dynamic_cast<OrExpAST*>(n.get())){walk_ast(o->and_exp,found);if(o->value.has_value())walk_ast(o->value->first,found);return;}
+	if(auto e=dynamic_cast<ExpAST*>(n.get())){walk_ast(e->exp,found);return;}
+	if(auto s=dynamic_cast<MatchedStmtAST*>(n.get())){if(s->lval.has_value())walk_ast(*s->lval,found);if(s->exp.has_value())walk_ast(*s->exp,found);if(s->block.has_value())walk_ast(*s->block,found);if(s->stmt1)walk_ast(s->stmt1,found);if(s->stmt2)walk_ast(s->stmt2,found);return;}
+	if(auto d=dynamic_cast<DanglingStmtAST*>(n.get())){walk_ast(d->exp,found);if(d->stmt1)walk_ast(d->stmt1,found);if(d->stmt2)walk_ast(d->stmt2,found);return;}
+	if(auto s=dynamic_cast<StmtAST*>(n.get())){walk_ast(s->stmt,found);return;}
+	if(auto b=dynamic_cast<BlockAST*>(n.get())){if(b->blocks)for(auto &x:*b->blocks)walk_ast(x,found);return;}
+	if(auto bi=dynamic_cast<BlockItemAST*>(n.get())){walk_ast(bi->block,found);return;}
+	if(auto vd=dynamic_cast<VarDefAST*>(n.get())){if(vd->init.has_value())walk_ast(*vd->init,found);return;}
+	if(auto d=dynamic_cast<DeclAST*>(n.get())){walk_ast(d->decl,found);return;}
+	if(auto v=dynamic_cast<VarDeclAST*>(n.get())){if(v->defs)for(auto &x:*v->defs)walk_ast(x,found);return;}
+	if(auto i=dynamic_cast<InitValAST*>(n.get())){if(i->exp.has_value())walk_ast(*i->exp,found);if(i->inits)for(auto &x:*i->inits)walk_ast(x,found);return;}
+}
+static void walk_decls(const node &n,unordered_set<string>&declared)
+{
+	if(!n) return;
+	if(auto vd=dynamic_cast<VarDefAST*>(n.get())){declared.insert(vd->ident);}
+	if(auto cd=dynamic_cast<ConstDefAST*>(n.get())){declared.insert(cd->ident);}
+	if(auto b=dynamic_cast<BlockAST*>(n.get())){if(b->blocks)for(auto &x:*b->blocks)walk_decls(x,declared);return;}
+	if(auto bi=dynamic_cast<BlockItemAST*>(n.get())){walk_decls(bi->block,declared);return;}
+	if(auto d=dynamic_cast<DeclAST*>(n.get())){walk_decls(d->decl,declared);return;}
+	if(auto v=dynamic_cast<VarDeclAST*>(n.get())){if(v->defs)for(auto &x:*v->defs)walk_decls(x,declared);return;}
+	if(auto cd=dynamic_cast<ConstDeclAST*>(n.get())){if(cd->defs)for(auto &x:*cd->defs)walk_decls(x,declared);return;}
+	if(auto s=dynamic_cast<StmtAST*>(n.get())){walk_decls(s->stmt,declared);return;}
+	if(auto ms=dynamic_cast<MatchedStmtAST*>(n.get())){if(ms->lval.has_value())walk_decls(*ms->lval,declared);if(ms->exp.has_value())walk_decls(*ms->exp,declared);if(ms->block.has_value())walk_decls(*ms->block,declared);if(ms->stmt1)walk_decls(ms->stmt1,declared);if(ms->stmt2)walk_decls(ms->stmt2,declared);return;}
+	if(auto ds=dynamic_cast<DanglingStmtAST*>(n.get())){if(ds->exp)walk_decls(ds->exp,declared);if(ds->stmt1)walk_decls(ds->stmt1,declared);if(ds->stmt2)walk_decls(ds->stmt2,declared);return;}
+	if(auto e=dynamic_cast<ExpAST*>(n.get())){walk_decls(e->exp,declared);return;}
+	if(auto o=dynamic_cast<OrExpAST*>(n.get())){walk_decls(o->and_exp,declared);if(o->value.has_value())walk_decls(o->value->first,declared);return;}
+	if(auto a=dynamic_cast<AndExpAST*>(n.get())){walk_decls(a->eq_exp,declared);if(a->value.has_value())walk_decls(a->value->first,declared);return;}
+	if(auto e=dynamic_cast<EqExpAST*>(n.get())){walk_decls(e->rel_exp,declared);if(e->value.has_value())walk_decls(e->value->first,declared);return;}
+	if(auto r=dynamic_cast<RelExpAST*>(n.get())){walk_decls(r->add_exp,declared);if(r->value.has_value())walk_decls(r->value->first,declared);return;}
+	if(auto a=dynamic_cast<AddExpAST*>(n.get())){walk_decls(a->mul_exp,declared);if(a->value.has_value())walk_decls(a->value->first,declared);return;}
+	if(auto m=dynamic_cast<MulExpAST*>(n.get())){walk_decls(m->unary_exp,declared);if(m->value.has_value())walk_decls(m->value->first,declared);return;}
+	if(auto u=dynamic_cast<UnaryExpAST*>(n.get())){if(!u->func)walk_decls(u->exp,declared);return;}
+	if(auto p=dynamic_cast<PrimaryExpAST*>(n.get())){if(p->exp)walk_decls(p->exp,declared);return;}
+	if(auto i=dynamic_cast<InitValAST*>(n.get())){if(i->exp.has_value())walk_decls(*i->exp,declared);if(i->inits)for(auto &x:*i->inits)walk_decls(x,declared);return;}
+}
+void LambdaExpAST::collect_captures()const
+{
+	if(!(cap_ref||cap_val)) return;
+	unordered_set<string>found;
+	walk_ast(block,found);
+	unordered_set<string>param_set;
+	for(auto &p:*params){auto lp=dynamic_cast<LambdaParamAST*>(p.get());param_set.insert(lp->ident);}
+	if(has_self)param_set.insert(self_name);
+	unordered_set<string>declared;
+	walk_decls(block,declared);
+	captures.clear();
+	for(auto &id:found){if(builtin_funcs.count(id))continue;if(func_symbol_val.count(id))continue;if(param_set.count(id))continue;if(declared.count(id))continue;captures.push_back(id);}
+	unordered_set<string>seen;vector<string>uniq;for(auto &c:captures){if(!seen.count(c)){seen.insert(c);uniq.push_back(c);}}captures=uniq;
+}
 void LambdaExpAST::pre_register()const
 {
 	if(!lambda_name.empty())
@@ -331,75 +397,89 @@ void LambdaExpAST::pre_register()const
 	lambda_name="__lambda_"+to_string(next_lambda_id++);
 	has_self=false;
 	self_name="";
-	int user_count=0;
-	for(const auto &p:*params)
-	{
-		auto lp=dynamic_cast<LambdaParamAST*>(p.get());
-		if(lp->is_self)
-		{
-			has_self=true;
-			self_name=lp->ident;
-		}
-		else
-			++user_count;
-	}
-	int total_params=user_count+(has_self?1:0);
+	user_count=0;
+	for(const auto &p:*params){auto lp=dynamic_cast<LambdaParamAST*>(p.get());if(lp->is_self){has_self=true;self_name=lp->ident;}else ++user_count;}
+	collect_captures();
+	int total_params=captures.size()+user_count+(has_self?1:0);
 	func_id[lambda_name]=next_func_id++;
 	func_sigs[lambda_name]={total_params,!type.empty()};
 	func_table[lambda_name]=!type.empty();
-	if(!builtin_funcs.count(lambda_name))
-	{
-		Symbol now(true,_total++);
-		symbol_table[lambda_name]=now;
-		func_symbol_val[lambda_name]=now.value;
-	}
+	if(!builtin_funcs.count(lambda_name)){Symbol now(true,_total++);symbol_table[lambda_name]=now;func_symbol_val[lambda_name]=now.value;}
+	if(captures.size()>0){thunk_name="__thunk_"+to_string(next_thunk_id++);ThunkInfo info;info.thunk_name=thunk_name;info.real_lambda_name=lambda_name;info.capture_names=captures;info.user_param_count=user_count;info.cap_count=(int)captures.size();info.ret_type=type.empty()?"":": i32";pending_thunks.push_back(info);}
 	pending_lambdas.push_back(this);
+}
+static void push_thunk_stack(const string &thunk_name,int K,const vector<Result>&cap_vals)
+{
+	Result sp(false,_total++);
+	out<<"\t"<<sp<<" = load @"<<thunk_name<<"_sp\n";
+	need_jump=true;
+	Result acc(false,_total++);
+	if(K==1) acc=sp;
+	else{out<<"\t"<<acc<<" = add 0, 0\n";for(int i=0;i<K;++i){Result tmp(false,_total++);out<<"\t"<<tmp<<" = add "<<acc<<", "<<sp<<"\n";acc=tmp;}}
+	Result ns(false,_total++);
+	out<<"\t"<<ns<<" = add "<<sp<<", 1\n";
+	out<<"\tstore "<<ns<<", @"<<thunk_name<<"_sp\n";
+	for(int i=0;i<K;++i)
+	{
+		Result offset;
+		if(i==0) offset=acc;
+		else{offset=Result(false,_total++);out<<"\t"<<offset<<" = add "<<acc<<", "<<i<<"\n";}
+		Symbol slot(true,_total++);
+		out<<"\t"<<slot<<" = getelemptr @"<<thunk_name<<"_stack, "<<offset<<"\n";
+		ptr_value.insert(slot);
+		_store(cap_vals[i],slot);
+	}
+	need_jump=true;
 }
 Result LambdaExpAST::print()const
 {
 	if(lambda_name.empty())
 		pre_register();
-	return Result(true,func_id[lambda_name]);
+	if(capture_count()==0||in_auto_def)
+		return Result(true,func_id[lambda_name]);
+	int K=capture_count();
+	Result sp(false,_total++);
+	out<<"\t"<<sp<<" = load @"<<thunk_name<<"_sp\n";
+	need_jump=true;
+	Result acc(false,_total++);
+	if(K==1) acc=sp;
+	else{out<<"\t"<<acc<<" = add 0, 0\n";for(int i=0;i<K;++i){Result tmp(false,_total++);out<<"\t"<<tmp<<" = add "<<acc<<", "<<sp<<"\n";acc=tmp;}}
+	Result ns(false,_total++);
+	out<<"\t"<<ns<<" = add "<<sp<<", 1\n";
+	out<<"\tstore "<<ns<<", @"<<thunk_name<<"_sp\n";
+	for(int i=0;i<K;++i)
+	{
+		Result offset;
+		if(i==0) offset=acc;
+		else{offset=Result(false,_total++);out<<"\t"<<offset<<" = add "<<acc<<", "<<i<<"\n";}
+		Symbol slot(true,_total++);
+		out<<"\t"<<slot<<" = getelemptr @"<<thunk_name<<"_stack, "<<offset<<"\n";
+		ptr_value.insert(slot);
+		Result val=_load(symbol_table[captures[i]]);
+		_store(val,slot);
+	}
+	need_jump=true;
+	return Result(true,func_id[thunk_name]);
 }
 void LambdaExpAST::print_body()const
 {
 	current_lambda_func_name=lambda_name;
-	string ret_str=type.empty()?"":": i32";
-	vector<pair<string,Symbol>>user_param_syms;
+	vector<Symbol>cap_param_syms(captures.size());
 	out<<"fun "<<string(Symbol(true,func_symbol_val[lambda_name]))<<"(";
 	bool first=true;
 	Symbol self_param_sym;
-	if(has_self)
-	{
-		self_param_sym=Symbol(true,_total++);
-		out<<self_param_sym<<"_: i32";
-		first=false;
-	}
-	for(const auto &p:*params)
-	{
-		auto lp=dynamic_cast<LambdaParamAST*>(p.get());
-		if(lp->is_self)
-			continue;
-		if(!first)
-			out<<", ";
-		first=false;
-		Symbol now(true,_total++);
-		symbol_insert(lp->ident,now);
-		out<<now<<"_: i32";
-	}
+	if(has_self){self_param_sym=Symbol(true,_total++);out<<self_param_sym<<"_: i32";first=false;}
+	for(size_t i=0;i<captures.size();++i){if(!first)out<<", ";first=false;cap_param_syms[i]=Symbol(true,_total++);out<<cap_param_syms[i]<<"_: i32";}
+	for(const auto &p:*params){auto lp=dynamic_cast<LambdaParamAST*>(p.get());if(lp->is_self)continue;if(!first)out<<", ";first=false;Symbol now(true,_total++);symbol_insert(lp->ident,now);out<<now<<"_: i32";}
 	out<<")"<<type<<" {\n";
 	string entry_label=string(Symbol(true,func_symbol_val[lambda_name]));
 	entry_label.erase(entry_label.begin());
 	symbol_stack.push_back({});
 	add_basic_block("%entry_"+entry_label);
 	first_block=true;
-	if(has_self)
-	{
-		Symbol self_sym(true,_total++);
-		symbol_insert(self_name,self_sym);
-		out<<"\t"<<self_sym<<" = alloc i32\n";
-		out<<"\tstore "<<self_param_sym<<"_, "<<self_sym<<"\n";
-	}
+	if(has_self){Symbol self_sym(true,_total++);symbol_insert(self_name,self_sym);out<<"\t"<<self_sym<<" = alloc i32\n";out<<"\tstore "<<self_param_sym<<"_, "<<self_sym<<"\n";}
+	ClosureLayout self_cl;self_cl.has_self=has_self;self_cl.user_param_count=user_count;self_cl.lambda_func_name=lambda_name;self_cl.has_captures=(captures.size()>0);closure_layouts[lambda_name]=self_cl;
+	for(size_t i=0;i<captures.size();++i){Symbol cap_slot(true,_total++);symbol_insert(captures[i],cap_slot);out<<"\t"<<cap_slot<<" = alloc i32\n";out<<"\tstore "<<cap_param_syms[i]<<"_, "<<cap_slot<<"\n";closure_layouts[lambda_name].cap_slots.push_back(cap_slot);closure_layouts[lambda_name].capture_names.push_back(captures[i]);}
 	for(const auto &p:*params)
 	{
 		auto lp=dynamic_cast<LambdaParamAST*>(p.get());
@@ -407,9 +487,10 @@ void LambdaExpAST::print_body()const
 			continue;
 		auto it=symbol_table.find(lp->ident);
 		assert(it!=symbol_table.end());
-		Symbol now=it->second;
+		Symbol now(true,_total++);
 		out<<"\t"<<now<<" = alloc i32\n";
-		out<<"\tstore "<<now<<"_, "<<now<<"\n";
+		out<<"\tstore "<<it->second<<"_, "<<now<<"\n";
+		symbol_insert(lp->ident,now);
 	}
 	first_block=false;
 	self_params.clear();
@@ -585,8 +666,32 @@ Result MatchedStmtAST::print()const
 	if(lval.has_value())
 	{
 		assert(exp.has_value());
-		auto now=Symbol((*lval)->print());
+		auto lv=dynamic_cast<LValAST*>((*lval).get());
 		auto x=(*exp)->print();
+		if(lv&&closure_layouts.count(lv->ident))
+		{
+			auto &lhs=closure_layouts[lv->ident];
+			_store(x,lhs.func_slot);
+			string rhs_id;
+			auto find_lval=[&](auto&&self,const node&n)->void{
+				if(!n||!rhs_id.empty())return;
+				if(auto l=dynamic_cast<LValAST*>(n.get())){rhs_id=l->ident;return;}
+				if(auto e=dynamic_cast<ExpAST*>(n.get())){self(self,e->exp);return;}
+				if(auto l=dynamic_cast<OrExpAST*>(n.get())){self(self,l->and_exp);if(l->value.has_value())self(self,l->value->first);return;}
+				if(auto l=dynamic_cast<AndExpAST*>(n.get())){self(self,l->eq_exp);if(l->value.has_value())self(self,l->value->first);return;}
+				if(auto l=dynamic_cast<EqExpAST*>(n.get())){self(self,l->rel_exp);if(l->value.has_value())self(self,l->value->first);return;}
+				if(auto l=dynamic_cast<RelExpAST*>(n.get())){self(self,l->add_exp);if(l->value.has_value())self(self,l->value->first);return;}
+				if(auto l=dynamic_cast<AddExpAST*>(n.get())){self(self,l->mul_exp);if(l->value.has_value())self(self,l->value->first);return;}
+				if(auto l=dynamic_cast<MulExpAST*>(n.get())){self(self,l->unary_exp);if(l->value.has_value())self(self,l->value->first);return;}
+				if(auto u=dynamic_cast<UnaryExpAST*>(n.get())){if(!u->func)self(self,u->exp);return;}
+				if(auto p=dynamic_cast<PrimaryExpAST*>(n.get())){if(p->lval.has_value())self(self,*p->lval);return;}
+			};
+			find_lval(find_lval,*exp);
+			if(!rhs_id.empty()&&closure_layouts.count(rhs_id)){auto &rhs=closure_layouts[rhs_id];size_t m=min(lhs.cap_slots.size(),rhs.cap_slots.size());for(size_t i=0;i<m;++i){Result val=_load(rhs.cap_slots[i]);_store(val,lhs.cap_slots[i]);}lhs.has_captures=true;}
+			else for(auto &slot:lhs.cap_slots)_store(Result(true,0),slot);
+			return x;
+		}
+		auto now=Symbol((*lval)->print());
 		_store(x,now);
 		return x;
 	}
@@ -724,10 +829,16 @@ Result VarDefAST::print()const
 	{
 		auto lambda=dynamic_cast<LambdaExpAST*>((*init).get());
 		Symbol now=_alloc();
+		bool prev_auto_def=in_auto_def;
+		in_auto_def=true;
 		Result fid=(*init)->print();
+		in_auto_def=prev_auto_def;
 		_store(fid,now);
+		int K=lambda->capture_count();
+		vector<Symbol>cap_slots(K);
+		for(int i=0;i<K;++i){cap_slots[i]=_alloc();string cap_name=lambda->captures[i];Symbol var_sym=symbol_table[cap_name];if(!var_sym.addr){auto cl=closure_layouts.find(current_lambda_func_name);if(cl!=closure_layouts.end()){auto &cn=cl->second.capture_names;auto &cs=cl->second.cap_slots;for(size_t ci=0;ci<cn.size();++ci)if(cn[ci]==cap_name&&ci<cs.size()){var_sym=cs[ci];break;}}}if(!var_sym.addr)continue;Result val=_load(var_sym);_store(val,cap_slots[i]);}
 		symbol_insert(ident,now);
-		closure_has_self[ident]=lambda->has_self;
+		ClosureLayout cl;cl.func_slot=now;cl.cap_slots=cap_slots;cl.capture_names=lambda->captures;cl.user_param_count=lambda->user_count;cl.has_self=lambda->has_self;cl.has_captures=(K>0);cl.lambda_func_name=lambda->lambda_name;closure_layouts[ident]=cl;
 		return fid;
 	}
 	if(exps->empty())
@@ -748,6 +859,17 @@ Result VarDefAST::print()const
 		}
 		else
 		{
+			if(func_ptr)
+			{
+				Symbol func_slot=_alloc();
+				Result value;
+				if(init.has_value()){value=(*init)->print();_store(value,func_slot);}
+				symbol_insert(ident,func_slot);
+				vector<Symbol>cap_slots(MAX_CAPTURES);
+				for(int i=0;i<MAX_CAPTURES;++i){cap_slots[i]=_alloc();_store(Result(true,0),cap_slots[i]);}
+				ClosureLayout cl;cl.func_slot=func_slot;cl.cap_slots=cap_slots;cl.has_self=false;closure_layouts[ident]=cl;
+				return value;
+			}
 			auto now=_alloc();
 			Result value;
 			if(init.has_value())
@@ -1011,13 +1133,10 @@ Result UnaryExpAST::print()const
 			}
 		}
 		Result callee_val;
-		if(fname.has_value())
-		{
-			auto sym=symbol_table[*fname];
-			callee_val=_load(sym);
-		}
-		else
-			callee_val=exp->print();
+		if(fname.has_value()){auto sym=symbol_table[*fname];callee_val=_load(sym);}
+		else callee_val=exp->print();
+		vector<Result>cap_vals;bool has_slf=false;
+		if(fname.has_value()){auto cl=closure_layouts.find(*fname);if(cl!=closure_layouts.end()){if(!cl->second.lambda_func_name.empty()||cl->second.has_self||cl->second.has_captures){for(auto &slot:cl->second.cap_slots)cap_vals.push_back(_load(slot));}if(cl->second.has_self)has_slf=true;}}
 		{
 			bool has_int=false,has_void=false;
 			for(auto &[fn,sig]:func_sigs)
@@ -1039,40 +1158,10 @@ Result UnaryExpAST::print()const
 				returns_int=true;
 		}
 		string ret_str=returns_int?"i32":"void";
-		int extra_args=0;
-		string self_str;
-		if(fname.has_value()&&closure_has_self.count(*fname)&&closure_has_self[*fname])
-		{
-			extra_args=1;
-			self_str="0";
-		}
-		string sentinel="@__fp_"+to_string(size)+"_"+ret_str;
+		string sentinel="@__fp_"+to_string(size+cap_vals.size())+"_"+ret_str;
 		check_ex();
-		if(returns_int)
-		{
-			Result now(false,_total++);
-			out<<"\t"<<now<<" = call "<<sentinel<<"(";
-			out<<callee_val;
-			if(extra_args)
-				out<<", "<<self_str;
-			for(int i=extra_args;i<size;++i)
-				out<<", "<<result[i];
-			out<<")\n";
-			need_jump=true;
-			return now;
-		}
-		else
-		{
-			out<<"\tcall "<<sentinel<<"(";
-			out<<callee_val;
-			if(extra_args)
-				out<<", "<<self_str;
-			for(int i=extra_args;i<size;++i)
-				out<<", "<<result[i];
-			out<<")\n";
-			need_jump=true;
-			return Result();
-		}
+		if(returns_int){Result now(false,_total++);out<<"\t"<<now<<" = call "<<sentinel<<"(";out<<callee_val;if(has_slf)out<<", 0";for(auto &cv:cap_vals)out<<", "<<cv;for(int i=has_slf?1:0;i<size;++i)out<<", "<<result[i];out<<")\n";need_jump=true;return now;}
+		else{out<<"\tcall "<<sentinel<<"(";out<<callee_val;if(has_slf)out<<", 0";for(auto &cv:cap_vals)out<<", "<<cv;for(int i=has_slf?1:0;i<size;++i)out<<", "<<result[i];out<<")\n";need_jump=true;return Result();}
 	}
 	if(!op.has_value())
 	{

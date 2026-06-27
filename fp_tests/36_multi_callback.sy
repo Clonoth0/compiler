@@ -1,0 +1,15 @@
+int add(int a,int b){return a+b;}
+int mul(int a,int b){return a*b;}
+int sub(int a,int b){return a-b;}
+int compose3(int (*f)(int,int),int (*g)(int,int),int (*h)(int,int),int x,int y)
+{
+	return f(g(x,y),h(x,y));
+}
+int main()
+{
+	int (*p)(int,int);
+	int (*q)(int,int);
+	int (*r)(int,int);
+	p=add;q=mul;r=sub;
+	return compose3(p,q,r,5,3);
+}

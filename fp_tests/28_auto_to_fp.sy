@@ -1,0 +1,11 @@
+int main()
+{
+	auto add=[&](int x)->int
+	{
+		int z=100;
+		return x+z;
+	};
+	int (*p)(int);
+	p=add;
+	return p(5);
+}

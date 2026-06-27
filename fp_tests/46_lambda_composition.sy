@@ -1,0 +1,10 @@
+int combine(int (*f)(int,int),int (*g)(int),int x,int y)
+{
+	return f(g(x),g(y));
+}
+int main()
+{
+	auto doubler=[](int x)->int{return x*2;};
+	auto adder=[](int a,int b)->int{return a+b;};
+	return combine(adder,doubler,3,4);
+}

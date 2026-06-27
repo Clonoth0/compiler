@@ -1,0 +1,11 @@
+int apply_twice(int (*f)(int),int x)
+{
+	return f(f(x));
+}
+int main()
+{
+	auto doubler=[](int x)->int{return x*2;};
+	int (*p)(int);
+	p=doubler;
+	return apply_twice(p,5);
+}

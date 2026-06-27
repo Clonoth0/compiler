@@ -1,0 +1,1 @@
+int main(){int n=100;auto f=[=](int x)->int{return x+n;};int a=f(1);n=200;int b=f(2);return a+b;}

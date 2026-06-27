@@ -1,0 +1,12 @@
+int filter(int (*p)(int),int a,int b)
+{
+	if(p(a))
+		return a;
+	return b;
+}
+int main()
+{
+	auto is_positive=[](int x)->int{return x>0;};
+	auto is_even=[](int x)->int{return !(x%2);};
+	return filter(is_positive,-5,10)+filter(is_even,7,8);
+}

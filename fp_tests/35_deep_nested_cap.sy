@@ -1,0 +1,18 @@
+int outer(int (*g)(int),int x)
+{
+	auto h=[&](int y)->int
+	{
+		int w=5;
+		return y+w;
+	};
+	return g(x)+h(x+1);
+}
+int main()
+{
+	auto f=[=](int x)->int
+	{
+		int v=3;
+		return x+v;
+	};
+	return outer(f,2)+outer([](int x)->int{return x;},3);
+}

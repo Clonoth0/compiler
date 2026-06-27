@@ -1,0 +1,14 @@
+int main()
+{
+	auto add=[&](int x)->int
+	{
+		int z=10;
+		return x+z;
+	};
+	auto mul=[=](int x)->int
+	{
+		int w=2;
+		return x*w;
+	};
+	return add(3)+mul(5);
+}

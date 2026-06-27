@@ -231,20 +231,38 @@ class LambdaParamAST:public BaseAST
 	public:
 		string ident;
 		bool is_self;
+		bool is_fp;
 		Result print()const override{return Result();}
 };
 class LambdaExpAST:public BaseAST
 {
 	public:
+		bool cap_ref;
+		bool cap_val;
 		unique_ptr<vector<node>>params;
 		string type;
 		node block;
 		mutable string lambda_name;
 		mutable bool has_self;
 		mutable string self_name;
+		mutable vector<string>captures;
+		mutable int user_count;
+		mutable string thunk_name;
+		int capture_count()const{return (int)captures.size();}
 		void pre_register()const override;
 		Result print()const override;
 		void print_body()const;
+		void collect_captures()const;
+};
+struct ClosureLayout
+{
+	Symbol func_slot;
+	vector<Symbol>cap_slots;
+	vector<string>capture_names;
+	int user_param_count;
+	bool has_self;
+	bool has_captures;
+	string lambda_func_name;
 };
 class ExpAST:public BaseAST
 {

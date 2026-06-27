@@ -1,0 +1,11 @@
+int main()
+{
+	auto f=[&](auto &self,int n)->int
+	{
+		int base=10;
+		if(!n)
+			return base;
+		return base+self(self,n-1);
+	};
+	return f(f,3);
+}

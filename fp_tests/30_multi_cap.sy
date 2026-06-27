@@ -1,0 +1,1 @@
+int main(){int a=1,b=2,c=3;auto sum=[&](int x)->int{return x+a+b+c;};return sum(4);}
