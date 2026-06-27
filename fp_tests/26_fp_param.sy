@@ -1,0 +1,3 @@
+int apply(int (*f)(int),int x){return f(x);}
+int add2(int x){return x+2;}
+int main(){auto a=[&](int x)->int{int y=10;return x+y;};return apply(a,3);}

@@ -262,6 +262,7 @@ struct ClosureLayout
 	int user_param_count;
 	bool has_self;
 	bool has_captures;
+	int cap_count;
 	string lambda_func_name;
 };
 class ExpAST:public BaseAST
