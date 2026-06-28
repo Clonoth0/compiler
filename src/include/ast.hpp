@@ -246,6 +246,7 @@ class LambdaExpAST:public BaseAST
 		mutable bool has_self;
 		mutable string self_name;
 		mutable vector<string>captures;
+		mutable vector<bool>capture_is_ref;
 		mutable int user_count;
 		mutable string thunk_name;
 		int capture_count()const{return (int)captures.size();}
@@ -259,6 +260,8 @@ struct ClosureLayout
 	Symbol func_slot;
 	vector<Symbol>cap_slots;
 	vector<string>capture_names;
+	vector<bool>capture_is_ref;
+	vector<Symbol>capture_ref_slots;
 	vector<int>capture_offsets;
 	bool capture_by_ref=false;
 	int user_param_count=0;

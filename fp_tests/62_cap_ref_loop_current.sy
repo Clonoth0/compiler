@@ -1,0 +1,1 @@
+int main(){int i=1,s=0;auto f=[&](int x)->int{return x+i;};while(i<=3){s=s+f(0);i=i+1;}return s;}

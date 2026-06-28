@@ -135,6 +135,65 @@ static void _store(const Result &result,const Symbol &symbol)
 	out<<"\t"<<"store "<<result<<", "<<symbol<<"\n";
 	need_jump=true;
 }
+static Symbol find_capture_source_slot(const string &cap_name)
+{
+	auto sym_it=symbol_table.find(cap_name);
+	if(sym_it!=symbol_table.end())
+		return sym_it->second;
+	auto cl=closure_layouts.find(current_lambda_func_name);
+	if(cl!=closure_layouts.end())
+	{
+		auto &cn=cl->second.capture_names;
+		auto &cs=cl->second.cap_slots;
+		for(size_t ci=0;ci<cn.size()&&ci<cs.size();++ci)
+			if(cn[ci]==cap_name)
+				return cs[ci];
+	}
+	return Symbol();
+}
+static Result load_capture_value(const string &cap_name)
+{
+	Symbol var_sym=find_capture_source_slot(cap_name);
+	if(var_sym.addr)
+		return _load(var_sym);
+	if(func_id.count(cap_name))
+		return Result(true,func_id[cap_name]);
+	return Result(true,0);
+}
+static Symbol source_slot_for_auto_capture(const string &cap_name,bool want_ref)
+{
+	auto sym_it=symbol_table.find(cap_name);
+	if(sym_it!=symbol_table.end())
+		return sym_it->second;
+	auto cl=closure_layouts.find(current_lambda_func_name);
+	if(cl!=closure_layouts.end())
+	{
+		auto &layout=cl->second;
+		for(size_t ci=0;ci<layout.capture_names.size()&&ci<layout.cap_slots.size();++ci)
+		{
+			if(layout.capture_names[ci]!=cap_name)
+				continue;
+			if(want_ref&&ci<layout.capture_is_ref.size()&&layout.capture_is_ref[ci]&&ci<layout.capture_ref_slots.size()&&layout.capture_ref_slots[ci].addr)
+				return layout.capture_ref_slots[ci];
+			if(want_ref&&ci<layout.capture_is_ref.size()&&layout.capture_is_ref[ci])
+				return _load(layout.cap_slots[ci]);
+			return layout.cap_slots[ci];
+		}
+	}
+	return Symbol();
+}
+static void refresh_ref_captures(const ClosureLayout &layout)
+{
+	size_t n=layout.cap_slots.size();
+	if(layout.cap_count>0&&layout.cap_count<(int)n)
+		n=layout.cap_count;
+	for(size_t i=0;i<n&&i<layout.capture_is_ref.size()&&i<layout.capture_ref_slots.size();++i)
+	{
+		if(!layout.capture_is_ref[i]||!layout.capture_ref_slots[i].addr)
+			continue;
+		_store(_load(layout.capture_ref_slots[i]),layout.cap_slots[i]);
+	}
+}
 static Result _add(const Result &lhs,const Result &rhs);
 static Result _mul(const Result &lhs,const Result &rhs);
 static Result fp_env_store_new(const Result &func_value,const vector<Result> &captures)
@@ -887,6 +946,7 @@ void LambdaExpAST::collect_captures()const
 	captures.clear();
 	for(auto &id:found){if(builtin_funcs.count(id))continue;if(func_symbol_val.count(id))continue;if(param_set.count(id))continue;if(declared.count(id))continue;captures.push_back(id);}
 	unordered_set<string>seen;vector<string>uniq;for(auto &c:captures){if(!seen.count(c)){seen.insert(c);uniq.push_back(c);}}captures=uniq;
+	capture_is_ref.assign(captures.size(),cap_ref);
 }
 void LambdaExpAST::pre_register()const
 {
@@ -913,31 +973,7 @@ Result LambdaExpAST::print()const
 		vector<Result>cap_vals;
 		for(const auto &cap_name:captures)
 		{
-			Symbol var_sym;
-			auto sym_it=symbol_table.find(cap_name);
-			if(sym_it!=symbol_table.end())
-				var_sym=sym_it->second;
-			if(!var_sym.addr)
-			{
-				auto cl=closure_layouts.find(current_lambda_func_name);
-				if(cl!=closure_layouts.end())
-				{
-					for(size_t ci=0;ci<cl->second.capture_names.size()&&ci<cl->second.cap_slots.size();++ci)
-					{
-						if(cl->second.capture_names[ci]==cap_name)
-						{
-							var_sym=cl->second.cap_slots[ci];
-							break;
-						}
-					}
-				}
-			}
-			if(var_sym.addr)
-				cap_vals.push_back(_load(var_sym));
-			else if(func_id.count(cap_name))
-				cap_vals.push_back(Result(true,func_id[cap_name]));
-			else
-				cap_vals.push_back(Result(true,0));
+			cap_vals.push_back(load_capture_value(cap_name));
 		}
 		return fp_env_store_new(Result(true,func_id[lambda_name]),cap_vals);
 	}
@@ -971,7 +1007,7 @@ void LambdaExpAST::print_body()const
 	add_basic_block("%entry_"+entry_label);
 	first_block=true;
 	if(has_self){Symbol self_sym(true,_total++);symbol_insert(self_name,self_sym);out<<"\t"<<self_sym<<" = alloc i32\n";out<<"\tstore "<<self_param_sym<<"_, "<<self_sym<<"\n";}
-	ClosureLayout self_cl;self_cl.has_self=has_self;self_cl.user_param_count=user_count;self_cl.lambda_func_name=lambda_name;self_cl.has_captures=(captures.size()>0);closure_layouts[lambda_name]=self_cl;
+	ClosureLayout self_cl;self_cl.has_self=has_self;self_cl.user_param_count=user_count;self_cl.lambda_func_name=lambda_name;self_cl.has_captures=(captures.size()>0);self_cl.capture_is_ref=capture_is_ref;closure_layouts[lambda_name]=self_cl;
 	for(size_t i=0;i<captures.size();++i){Symbol cap_slot(true,_total++);symbol_insert(captures[i],cap_slot);out<<"\t"<<cap_slot<<" = alloc i32\n";out<<"\tstore "<<cap_param_syms[i]<<"_, "<<cap_slot<<"\n";closure_layouts[lambda_name].cap_slots.push_back(cap_slot);closure_layouts[lambda_name].capture_names.push_back(captures[i]);}
 	for(const auto &p:*params)
 	{
@@ -1186,7 +1222,7 @@ Result MatchedStmtAST::print()const
 				if(auto p=dynamic_cast<PrimaryExpAST*>(n.get())){if(p->lval.has_value())self(self,*p->lval);return;}
 			};
 			find_lval(find_lval,*exp);
-			if(!rhs_id.empty()&&closure_layouts.count(rhs_id)){auto &rhs=closure_layouts[rhs_id];size_t N=rhs.cap_slots.size();if(rhs.cap_count>0)N=rhs.cap_count;for(size_t i=0;i<N;++i){Result val=_load(rhs.cap_slots[i]);_store(val,lhs.cap_slots[i]);}lhs.has_captures=(N>0);lhs.cap_count=N;}
+			if(!rhs_id.empty()&&closure_layouts.count(rhs_id)){auto &rhs=closure_layouts[rhs_id];size_t N=rhs.cap_slots.size();if(rhs.cap_count>0)N=rhs.cap_count;for(size_t i=0;i<N;++i){Result val=_load(rhs.cap_slots[i]);_store(val,lhs.cap_slots[i]);}lhs.capture_names=rhs.capture_names;lhs.capture_is_ref=rhs.capture_is_ref;lhs.capture_ref_slots=rhs.capture_ref_slots;lhs.has_captures=(N>0);lhs.cap_count=N;}
 			else for(auto &slot:lhs.cap_slots)_store(Result(true,0),slot);
 			return x;
 		}
@@ -1335,9 +1371,10 @@ Result VarDefAST::print()const
 		_store(fid,now);
 		int K=lambda->capture_count();
 		vector<Symbol>cap_slots(K);
-		for(int i=0;i<K;++i){cap_slots[i]=_alloc();string cap_name=lambda->captures[i];Symbol var_sym;auto sym_it=symbol_table.find(cap_name);if(sym_it!=symbol_table.end())var_sym=sym_it->second;if(!var_sym.addr){auto cl=closure_layouts.find(current_lambda_func_name);if(cl!=closure_layouts.end()){auto &cn=cl->second.capture_names;auto &cs=cl->second.cap_slots;for(size_t ci=0;ci<cn.size();++ci)if(cn[ci]==cap_name&&ci<cs.size()){var_sym=cs[ci];break;}}}if(!var_sym.addr){if(func_id.count(cap_name))_store(Result(true,func_id[cap_name]),cap_slots[i]);continue;}Result val=_load(var_sym);_store(val,cap_slots[i]);}
+		vector<Symbol>ref_slots(K);
+		for(int i=0;i<K;++i){cap_slots[i]=_alloc();string cap_name=lambda->captures[i];bool by_ref=i<(int)lambda->capture_is_ref.size()&&lambda->capture_is_ref[i];Symbol var_sym=source_slot_for_auto_capture(cap_name,by_ref);if(by_ref&&var_sym.addr)ref_slots[i]=var_sym;if(!var_sym.addr){if(func_id.count(cap_name))_store(Result(true,func_id[cap_name]),cap_slots[i]);continue;}Result val=_load(var_sym);_store(val,cap_slots[i]);}
 		symbol_insert(ident,now);
-		ClosureLayout cl;cl.func_slot=now;cl.cap_slots=cap_slots;cl.capture_names=lambda->captures;cl.user_param_count=lambda->user_count;cl.has_self=lambda->has_self;cl.has_captures=(K>0);cl.cap_count=K;cl.lambda_func_name=lambda->lambda_name;closure_layouts[ident]=cl;
+		ClosureLayout cl;cl.func_slot=now;cl.cap_slots=cap_slots;cl.capture_names=lambda->captures;cl.capture_is_ref=lambda->capture_is_ref;cl.capture_ref_slots=ref_slots;cl.user_param_count=lambda->user_count;cl.has_self=lambda->has_self;cl.has_captures=(K>0);cl.cap_count=K;cl.lambda_func_name=lambda->lambda_name;closure_layouts[ident]=cl;
 		return fid;
 	}
 	if(exps->empty())
@@ -1615,6 +1652,7 @@ Result UnaryExpAST::print()const
 			auto self_layout=closure_layouts.find(current_lambda_func_name);
 			if(self_layout!=closure_layouts.end())
 			{
+				refresh_ref_captures(self_layout->second);
 				for(auto &slot:self_layout->second.cap_slots)
 					current_caps.push_back(_load(slot));
 			}
@@ -1652,6 +1690,7 @@ Result UnaryExpAST::print()const
 				string lambda_sym=string(Symbol(true,func_symbol_val[layout.lambda_func_name]));
 				returns_int=func_table[layout.lambda_func_name];
 				vector<Result>cap_vals;
+				refresh_ref_captures(layout);
 				int n=layout.cap_count>0?layout.cap_count:(int)layout.cap_slots.size();
 				for(int i=0;i<n;++i)
 					cap_vals.push_back(_load(layout.cap_slots[i]));
