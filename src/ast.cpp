@@ -342,6 +342,7 @@ static void walk_ast(const node &n,unordered_set<string>&found)
 	if(auto d=dynamic_cast<DeclAST*>(n.get())){walk_ast(d->decl,found);return;}
 	if(auto v=dynamic_cast<VarDeclAST*>(n.get())){if(v->defs)for(auto &x:*v->defs)walk_ast(x,found);return;}
 	if(auto i=dynamic_cast<InitValAST*>(n.get())){if(i->exp.has_value())walk_ast(*i->exp,found);if(i->inits)for(auto &x:*i->inits)walk_ast(x,found);return;}
+	if(auto l=dynamic_cast<LambdaExpAST*>(n.get())){if(l->block)walk_ast(l->block,found);return;}
 }
 static void walk_decls(const node &n,unordered_set<string>&declared)
 {
@@ -366,6 +367,7 @@ static void walk_decls(const node &n,unordered_set<string>&declared)
 	if(auto u=dynamic_cast<UnaryExpAST*>(n.get())){if(!u->func)walk_decls(u->exp,declared);return;}
 	if(auto p=dynamic_cast<PrimaryExpAST*>(n.get())){if(p->exp)walk_decls(p->exp,declared);return;}
 	if(auto i=dynamic_cast<InitValAST*>(n.get())){if(i->exp.has_value())walk_decls(*i->exp,declared);if(i->inits)for(auto &x:*i->inits)walk_decls(x,declared);return;}
+	if(auto l=dynamic_cast<LambdaExpAST*>(n.get())){if(l->block)walk_decls(l->block,declared);for(auto &p:*l->params){auto lp=dynamic_cast<LambdaParamAST*>(p.get());declared.insert(lp->ident);}return;}
 }
 void LambdaExpAST::collect_captures()const
 {

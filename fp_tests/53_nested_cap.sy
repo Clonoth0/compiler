@@ -1,0 +1,1 @@
+int main(){int a=1,b=2;auto outer=[&](int x)->int{auto inner=[&](int y)->int{return y+a+b;};return inner(x);};return outer(5);}
