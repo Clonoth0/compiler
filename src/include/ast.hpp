@@ -243,6 +243,7 @@ class LambdaExpAST:public BaseAST
 		string type;
 		node block;
 		mutable string lambda_name;
+		mutable string ref_lambda_name;
 		mutable bool has_self;
 		mutable string self_name;
 		mutable vector<string>captures;
@@ -270,6 +271,7 @@ struct ClosureLayout
 	bool has_captures=false;
 	int cap_count=0;
 	string lambda_func_name;
+	string ref_lambda_func_name;
 };
 class ExpAST:public BaseAST
 {

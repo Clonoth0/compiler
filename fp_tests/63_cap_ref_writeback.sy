@@ -1,0 +1,1 @@
+int main(){int n=1;auto inc=[&](int x)->int{n=n+x;return n;};int a=inc(2);int b=inc(3);return a*10+b+n;}
