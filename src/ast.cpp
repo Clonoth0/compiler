@@ -855,13 +855,16 @@ Result ProgramAST::print()const
 	{
 		for(const auto &def:*defs)
 		{
+			auto fd=dynamic_cast<FuncDefAST*>(def.get());
+			if(include_main)
+			{
+				if(!fd||fd->ident!="main")
+					continue;
+			}
+			else if(fd&&fd->ident=="main")
+				continue;
 			if(def->has_func_ptr_params()==fp)
 			{
-				auto fd=dynamic_cast<FuncDefAST*>(def.get());
-				if(fd&&fd->ident=="main"&&!include_main)
-					continue;
-				if(fd&&fd->ident!="main"&&include_main)
-					continue;
 				if(fd&&!builtin_funcs.count(fd->ident))
 					func_id[fd->ident]=next_func_id++;
 				is_global=true;
