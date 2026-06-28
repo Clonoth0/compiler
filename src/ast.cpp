@@ -211,10 +211,18 @@ static bool layout_needs_ref_abi(const ClosureLayout &layout)
 			return true;
 	return false;
 }
+static int layout_cap_count(const ClosureLayout &layout)
+{
+	if(layout.cap_count>0)
+		return layout.cap_count;
+	if(!layout.has_captures)
+		return 0;
+	return (int)layout.cap_slots.size();
+}
 static vector<Result> capture_args_for_layout(const ClosureLayout &layout,bool use_ref_abi)
 {
 	vector<Result>cap_vals;
-	int n=layout.cap_count>0?layout.cap_count:(int)layout.cap_slots.size();
+	int n=layout_cap_count(layout);
 	for(int i=0;i<n;++i)
 	{
 		bool by_ref=use_ref_abi&&i<(int)layout.capture_is_ref.size()&&layout.capture_is_ref[i]&&i<(int)layout.capture_ref_slots.size()&&layout.capture_ref_slots[i].addr;
@@ -223,6 +231,27 @@ static vector<Result> capture_args_for_layout(const ClosureLayout &layout,bool u
 		else
 			cap_vals.push_back(_load(layout.cap_slots[i]));
 	}
+	return cap_vals;
+}
+static Result capture_value_for_env(const ClosureLayout &layout,int i)
+{
+	bool by_ref=i<(int)layout.capture_is_ref.size()&&layout.capture_is_ref[i];
+	if(by_ref&&i<(int)layout.capture_ref_slots.size()&&layout.capture_ref_slots[i].addr)
+	{
+		Symbol src=resolve_ref_slot(layout.capture_ref_slots[i]);
+		if(src.addr)
+			return _load(src);
+	}
+	if(i<(int)layout.cap_slots.size()&&layout.cap_slots[i].addr)
+		return _load(layout.cap_slots[i]);
+	return Result(true,0);
+}
+static vector<Result> capture_values_for_env(const ClosureLayout &layout)
+{
+	vector<Result>cap_vals;
+	int n=layout_cap_count(layout);
+	for(int i=0;i<n;++i)
+		cap_vals.push_back(capture_value_for_env(layout,i));
 	return cap_vals;
 }
 static vector<Result> capture_args_for_lambda_expr(const LambdaExpAST *lambda,bool use_ref_abi)
@@ -264,6 +293,94 @@ static Result fp_env_store_new(const Result &func_value,const vector<Result> &ca
 	}
 	_store(_add(sp,Result(true,1)),Symbol(true,func_symbol_val["__fp_env_sp"]));
 	return env_id;
+}
+static optional<string> single_lval_ident(const node &n)
+{
+	if(!n)
+		return nullopt;
+	if(auto lv=dynamic_cast<LValAST*>(n.get()))
+	{
+		if(lv->exps&&lv->exps->empty())
+			return lv->ident;
+		return nullopt;
+	}
+	if(auto p=dynamic_cast<PrimaryExpAST*>(n.get()))
+	{
+		if(p->lval.has_value())
+			return single_lval_ident(*p->lval);
+		if(p->number.has_value())
+			return nullopt;
+		return single_lval_ident(p->exp);
+	}
+	if(auto u=dynamic_cast<UnaryExpAST*>(n.get()))
+	{
+		if(u->func||u->op.has_value())
+			return nullopt;
+		return single_lval_ident(u->exp);
+	}
+	if(auto m=dynamic_cast<MulExpAST*>(n.get()))
+	{
+		if(m->value.has_value())
+			return nullopt;
+		return single_lval_ident(m->unary_exp);
+	}
+	if(auto a=dynamic_cast<AddExpAST*>(n.get()))
+	{
+		if(a->value.has_value())
+			return nullopt;
+		return single_lval_ident(a->mul_exp);
+	}
+	if(auto r=dynamic_cast<RelExpAST*>(n.get()))
+	{
+		if(r->value.has_value())
+			return nullopt;
+		return single_lval_ident(r->add_exp);
+	}
+	if(auto e=dynamic_cast<EqExpAST*>(n.get()))
+	{
+		if(e->value.has_value())
+			return nullopt;
+		return single_lval_ident(e->rel_exp);
+	}
+	if(auto a=dynamic_cast<AndExpAST*>(n.get()))
+	{
+		if(a->value.has_value())
+			return nullopt;
+		return single_lval_ident(a->eq_exp);
+	}
+	if(auto o=dynamic_cast<OrExpAST*>(n.get()))
+	{
+		if(o->value.has_value())
+			return nullopt;
+		return single_lval_ident(o->and_exp);
+	}
+	if(auto e=dynamic_cast<ExpAST*>(n.get()))
+		return single_lval_ident(e->exp);
+	return nullopt;
+}
+static Result print_call_arg(const node &arg)
+{
+	auto ident=single_lval_ident(arg);
+	if(ident.has_value())
+	{
+		auto cl=closure_layouts.find(*ident);
+		if(cl!=closure_layouts.end())
+		{
+			const auto &layout=cl->second;
+			if(layout.has_captures||layout_cap_count(layout)>0)
+			{
+				Result fid;
+				if(layout.func_slot.addr)
+					fid=_load(layout.func_slot);
+				else if(!layout.lambda_func_name.empty()&&func_id.count(layout.lambda_func_name))
+					fid=Result(true,func_id[layout.lambda_func_name]);
+				else
+					return arg->print();
+				return fp_env_store_new(fid,capture_values_for_env(layout));
+			}
+		}
+	}
+	return arg->print();
 }
 static void emit_fp_helper(int n,bool returns_int)
 {
@@ -1311,23 +1428,42 @@ Result MatchedStmtAST::print()const
 		{
 			auto &lhs=closure_layouts[lv->ident];
 			_store(x,lhs.func_slot);
-			string rhs_id;
-			auto find_lval=[&](auto&&self,const node&n)->void{
-				if(!n||!rhs_id.empty())return;
-				if(auto l=dynamic_cast<LValAST*>(n.get())){rhs_id=l->ident;return;}
-				if(auto e=dynamic_cast<ExpAST*>(n.get())){self(self,e->exp);return;}
-				if(auto l=dynamic_cast<OrExpAST*>(n.get())){self(self,l->and_exp);if(l->value.has_value())self(self,l->value->first);return;}
-				if(auto l=dynamic_cast<AndExpAST*>(n.get())){self(self,l->eq_exp);if(l->value.has_value())self(self,l->value->first);return;}
-				if(auto l=dynamic_cast<EqExpAST*>(n.get())){self(self,l->rel_exp);if(l->value.has_value())self(self,l->value->first);return;}
-				if(auto l=dynamic_cast<RelExpAST*>(n.get())){self(self,l->add_exp);if(l->value.has_value())self(self,l->value->first);return;}
-				if(auto l=dynamic_cast<AddExpAST*>(n.get())){self(self,l->mul_exp);if(l->value.has_value())self(self,l->value->first);return;}
-				if(auto l=dynamic_cast<MulExpAST*>(n.get())){self(self,l->unary_exp);if(l->value.has_value())self(self,l->value->first);return;}
-				if(auto u=dynamic_cast<UnaryExpAST*>(n.get())){if(!u->func)self(self,u->exp);return;}
-				if(auto p=dynamic_cast<PrimaryExpAST*>(n.get())){if(p->lval.has_value())self(self,*p->lval);return;}
-			};
-			find_lval(find_lval,*exp);
-			if(!rhs_id.empty()&&closure_layouts.count(rhs_id)){auto &rhs=closure_layouts[rhs_id];size_t N=rhs.cap_slots.size();if(rhs.cap_count>0)N=rhs.cap_count;for(size_t i=0;i<N;++i){Result val=_load(rhs.cap_slots[i]);_store(val,lhs.cap_slots[i]);}lhs.capture_names=rhs.capture_names;lhs.capture_is_ref=rhs.capture_is_ref;lhs.capture_ref_slots=rhs.capture_ref_slots;lhs.has_captures=(N>0);lhs.cap_count=N;}
-			else for(auto &slot:lhs.cap_slots)_store(Result(true,0),slot);
+			auto rhs_id=single_lval_ident(*exp);
+			if(rhs_id.has_value()&&closure_layouts.count(*rhs_id))
+			{
+				auto &rhs=closure_layouts[*rhs_id];
+				int N=layout_cap_count(rhs);
+				for(int i=0;i<N;++i)
+				{
+					Result val=capture_value_for_env(rhs,i);
+					_store(val,lhs.cap_slots[i]);
+				}
+				for(size_t i=N;i<lhs.cap_slots.size();++i)
+					_store(Result(true,0),lhs.cap_slots[i]);
+				lhs.capture_names=rhs.capture_names;
+				lhs.capture_is_ref.assign(N,false);
+				lhs.capture_ref_slots.clear();
+				lhs.has_captures=(N>0);
+				lhs.cap_count=N;
+				lhs.lambda_func_name=rhs.lambda_func_name;
+				lhs.ref_lambda_func_name="";
+				lhs.has_self=rhs.has_self;
+				lhs.user_param_count=rhs.user_param_count;
+			}
+			else
+			{
+				for(auto &slot:lhs.cap_slots)
+					_store(Result(true,0),slot);
+				lhs.capture_names.clear();
+				lhs.capture_is_ref.clear();
+				lhs.capture_ref_slots.clear();
+				lhs.has_captures=false;
+				lhs.cap_count=0;
+				lhs.lambda_func_name.clear();
+				lhs.ref_lambda_func_name.clear();
+				lhs.has_self=false;
+				lhs.user_param_count=0;
+			}
 			return x;
 		}
 		auto now=Symbol((*lval)->print());
@@ -1703,7 +1839,7 @@ Result UnaryExpAST::print()const
 		int size=params->size();
 		vector<Result>result(size);
 		for(int i=0;i<size;++i)
-			result[i]=(*params)[i]->print();
+			result[i]=print_call_arg((*params)[i]);
 		bool is_direct=false;
 		string target_func;
 		bool returns_int=true;
@@ -1711,7 +1847,7 @@ Result UnaryExpAST::print()const
 		{
 			auto it=symbol_table.find(*fname);
 			auto fit=func_symbol_val.find(*fname);
-			if(builtin_funcs.count(*fname)||(it!=symbol_table.end()&&fit!=func_symbol_val.end()&&it->second.value==fit->second))
+			if(builtin_funcs.count(*fname)||(fit!=func_symbol_val.end()&&it!=symbol_table.end()&&it->second.addr&&it->second.value==fit->second))
 			{
 				is_direct=true;
 				target_func=*fname;
@@ -1762,14 +1898,8 @@ Result UnaryExpAST::print()const
 			if(self_layout!=closure_layouts.end())
 			{
 				const auto &layout=self_layout->second;
-				for(size_t i=0;i<layout.cap_slots.size();++i)
-				{
-					bool by_ref=i<layout.capture_is_ref.size()&&layout.capture_is_ref[i];
-					if(by_ref)
-						current_caps.push_back(Result(layout.cap_slots[i]));
-					else
-						current_caps.push_back(_load(layout.cap_slots[i]));
-				}
+				bool use_ref_abi=!layout.ref_lambda_func_name.empty()&&current_lambda_func_name==layout.ref_lambda_func_name;
+				current_caps=capture_args_for_layout(layout,use_ref_abi);
 			}
 			check_ex();
 			if(returns_int)

@@ -1,0 +1,15 @@
+int id(int x)
+{
+	return x;
+}
+int main()
+{
+	int z=2;
+	auto f=[=](auto &self,int n,int (*p)(int))->int
+	{
+		if(!n)
+			return p(z);
+		return self(self,n-1,[=](int x)->int{return p(x+n+z);});
+	};
+	return f(f,3,id);
+}

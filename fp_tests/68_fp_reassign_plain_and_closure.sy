@@ -1,0 +1,19 @@
+int add1(int x)
+{
+	return x+1;
+}
+int main()
+{
+	int base=10;
+	auto f=[=](int x)->int{return x+base;};
+	auto g=[&](int x)->int{return x+base*2;};
+	int (*p)(int);
+	p=f;
+	int a=p(1);
+	base=3;
+	p=add1;
+	int b=p(4);
+	p=g;
+	int c=p(5);
+	return a+b+c;
+}

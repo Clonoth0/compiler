@@ -1,0 +1,11 @@
+int main()
+{
+	int x=1;
+	auto bump=[&](int step)->void
+	{
+		x=x+step;
+	};
+	bump(4);
+	bump(5);
+	return x;
+}

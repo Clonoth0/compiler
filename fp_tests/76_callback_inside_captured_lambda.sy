@@ -1,0 +1,13 @@
+int mul2(int x)
+{
+	return x*2;
+}
+int main()
+{
+	int offset=3;
+	auto h=[&](int (*f)(int),int v)->int
+	{
+		return f(v)+f(v+1)+offset;
+	};
+	return h(mul2,4);
+}

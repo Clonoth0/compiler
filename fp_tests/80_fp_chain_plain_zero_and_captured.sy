@@ -1,0 +1,18 @@
+int square(int x)
+{
+	return x*x;
+}
+int main()
+{
+	int k=4;
+	auto add=[=](int x)->int{return x+k;};
+	auto dec=[](int x)->int{return x-1;};
+	int (*p)(int);
+	p=square;
+	int a=p(3);
+	p=dec;
+	int b=p(a);
+	p=add;
+	int c=p(b);
+	return c;
+}

@@ -1,0 +1,11 @@
+int main()
+{
+	int x=3;
+	int a=[=](int y)->int{return x+y;}(4);
+	int b=[&](int y)->int
+	{
+		x=x+y;
+		return x;
+	}(5);
+	return a*10+b+x;
+}

@@ -1,0 +1,15 @@
+int main()
+{
+	int x=5;
+	auto by_val=[=](int y)->int{return x+y;};
+	auto by_ref=[&](int y)->int
+	{
+		x=x+y;
+		return x;
+	};
+	x=10;
+	int a=by_val(1);
+	int b=by_ref(2);
+	int c=by_val(3);
+	return a*10+b+c;
+}

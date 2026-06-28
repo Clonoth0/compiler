@@ -1,0 +1,13 @@
+int main()
+{
+	int acc=0;
+	auto sum=[&](auto &self,int n)->int
+	{
+		if(!n)
+			return acc;
+		acc=acc+n;
+		return self(self,n-1);
+	};
+	int r=sum(sum,4);
+	return r+acc;
+}
