@@ -1,0 +1,1 @@
+int main(){int n=10;auto step=[&](int x)->int{return x+n;};int (*p)(int);p=step;return p(3)+p(4);}

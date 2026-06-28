@@ -1,0 +1,1 @@
+int main(){int x=5;auto add=[&](int a)->int{auto dbl=[&](int b)->int{return b*2;};return a+x+dbl(3);};return add(1);}

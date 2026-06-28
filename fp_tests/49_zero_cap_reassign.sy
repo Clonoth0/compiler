@@ -1,0 +1,1 @@
+int main(){int a=3;auto f=[&](int x)->int{return x+a;};auto g=[](int x)->int{return x*2;};int (*p)(int);p=f;int s=p(4);p=g;s=s+p(5);return s;}

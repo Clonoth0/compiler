@@ -1,0 +1,1 @@
+int add(int x,int y){return x+y;} int sub(int x,int y){return x-y;} int main(){int (*p)(int,int);int v=1;if(v){p=add;}else{p=sub;}return p(7,3);}

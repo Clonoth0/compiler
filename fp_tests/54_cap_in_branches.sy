@@ -1,0 +1,1 @@
+int main(){int a=5,b=10,c=0;int (*p)(int);if(a<b){auto f=[&](int x)->int{return x+a;};p=f;c=p(3);}else{auto g=[&](int x)->int{return x+b;};p=g;c=p(3);}return c;}
