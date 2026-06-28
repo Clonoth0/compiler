@@ -1,8 +1,10 @@
 #include<cassert>
+#include<algorithm>
 #include<map>
 #include<set>
 #include<unordered_map>
 #include<unordered_set>
+#include<tuple>
 #include"include/ast.hpp"
 Result::Result(const Symbol &rhs)
 {
@@ -25,20 +27,23 @@ struct FuncSig
 {
 	int param_count;
 	bool returns_int;
+	bool all_i32_params;
+	bool has_self_param;
 };
+static constexpr int FP_CAP_SLOTS=8;
+static constexpr int FP_ENV_BASE=1000000;
+static constexpr int FP_ENV_LIMIT=256;
+static constexpr int FP_ENV_WORDS=1+FP_CAP_SLOTS;
 static unordered_map<string,int>func_id;
 static unordered_map<string,int>func_symbol_val;
 static unordered_map<string,FuncSig>func_sigs;
 static int next_func_id=0;
 static int next_lambda_id=0;
-static vector<const LambdaExpAST*>pending_lambdas;
+static int fp_call_total=0;
 static unordered_map<string,ClosureLayout>closure_layouts;
 static unordered_set<string>self_params;
 static string current_lambda_func_name;
-static int next_thunk_id=0;
 static bool in_auto_def=false;
-struct ThunkInfo{string thunk_name;string real_lambda_name;vector<string>capture_names;int user_param_count;int cap_count;string ret_type;};
-static vector<ThunkInfo>pending_thunks;
 static int if_total=0,while_total=0,ex_total=0; // basic block
 static bool need_jump=false,need_ex=false;
 static vector<int>while_stack;
@@ -129,6 +134,409 @@ static void _store(const Result &result,const Symbol &symbol)
 	check_ex();
 	out<<"\t"<<"store "<<result<<", "<<symbol<<"\n";
 	need_jump=true;
+}
+static Result _add(const Result &lhs,const Result &rhs);
+static Result _mul(const Result &lhs,const Result &rhs);
+static Result fp_env_store_new(const Result &func_value,const vector<Result> &captures)
+{
+	Result sp=_load(Symbol(true,func_symbol_val["__fp_env_sp"]));
+	Result env_id=_add(sp,Result(true,FP_ENV_BASE));
+	auto func_slot=_getelemptr(Symbol(true,func_symbol_val["__fp_env"]),_mul(sp,Result(true,FP_ENV_WORDS)));
+	ptr_value.insert(func_slot);
+	_store(func_value,func_slot);
+	for(int i=0;i<FP_CAP_SLOTS;++i)
+	{
+		auto slot=_getelemptr(Symbol(true,func_symbol_val["__fp_env"]),_add(_mul(sp,Result(true,FP_ENV_WORDS)),Result(true,i+1)));
+		ptr_value.insert(slot);
+		if(i<(int)captures.size())
+			_store(captures[i],slot);
+		else
+			_store(Result(true,0),slot);
+	}
+	_store(_add(sp,Result(true,1)),Symbol(true,func_symbol_val["__fp_env_sp"]));
+	return env_id;
+}
+static void emit_fp_helper(int n,bool returns_int)
+{
+	vector<pair<int,string>>cands;
+	vector<tuple<int,string,int>>env_cands;
+	for(const auto &[name,id]:func_id)
+	{
+		auto it=func_sigs.find(name);
+		if(it==func_sigs.end())
+			continue;
+		if(builtin_funcs.count(name))
+			continue;
+		if(it->second.returns_int!=returns_int||!it->second.all_i32_params||it->second.has_self_param)
+			continue;
+		if(it->second.param_count==n)
+			cands.emplace_back(id,name);
+		if(it->second.param_count>=n&&it->second.param_count<=n+FP_CAP_SLOTS)
+			env_cands.emplace_back(id,name,it->second.param_count-n);
+	}
+	sort(cands.begin(),cands.end());
+	sort(env_cands.begin(),env_cands.end());
+	string helper_name="__fp_"+to_string(n)+"_"+(returns_int?"i32":"void");
+	string default_label="%"+helper_name+"_default";
+	out<<"fun @"+helper_name<<"(%fid: i32";
+	for(int i=0;i<n;++i)
+		out<<", %a"<<i<<": i32";
+	out<<")"<<(returns_int?" : i32":"")<<" {\n";
+	out<<"%entry_"+helper_name<<":\n";
+	if(!env_cands.empty())
+	{
+		string direct_label="%"+helper_name+"_direct";
+		string env_label="%"+helper_name+"_env";
+		Result is_env(false,_total++);
+		out<<"\t"<<is_env<<" = ge %fid, "<<FP_ENV_BASE<<"\n";
+		out<<"\tbr "<<is_env<<", "<<env_label<<", "<<direct_label<<"\n";
+		out<<env_label<<":\n";
+		Result row(false,_total++);
+		out<<"\t"<<row<<" = sub %fid, "<<FP_ENV_BASE<<"\n";
+		Result base_pos(false,_total++);
+		out<<"\t"<<base_pos<<" = mul "<<row<<", "<<FP_ENV_WORDS<<"\n";
+		Symbol func_slot(true,_total++);
+		out<<"\t"<<func_slot<<" = getelemptr "<<Symbol(true,func_symbol_val["__fp_env"])<<", "<<base_pos<<"\n";
+		Result real_fid(false,_total++);
+		out<<"\t"<<real_fid<<" = load "<<func_slot<<"\n";
+		vector<Result>caps;
+		for(int i=0;i<FP_CAP_SLOTS;++i)
+		{
+			Result pos(false,_total++);
+			out<<"\t"<<pos<<" = add "<<base_pos<<", "<<(i+1)<<"\n";
+			Symbol slot(true,_total++);
+			out<<"\t"<<slot<<" = getelemptr "<<Symbol(true,func_symbol_val["__fp_env"])<<", "<<pos<<"\n";
+			Result cap(false,_total++);
+			out<<"\t"<<cap<<" = load "<<slot<<"\n";
+			caps.push_back(cap);
+		}
+		string env_default="%"+helper_name+"_env_default";
+		if(!env_cands.empty())
+			out<<"\tjump %"<<helper_name<<"_env_check_0\n";
+		for(size_t idx=0;idx<env_cands.size();++idx)
+		{
+			auto [id,name,hidden]=env_cands[idx];
+			string check_label="%"+helper_name+"_env_check_"+to_string(idx);
+			string case_label="%"+helper_name+"_env_case_"+to_string(idx);
+			string next_label=(idx+1<env_cands.size())?"%"+helper_name+"_env_check_"+to_string(idx+1):env_default;
+			out<<check_label<<":\n";
+			Result cond(false,_total++);
+			out<<"\t"<<cond<<" = eq "<<real_fid<<", "<<id<<"\n";
+			out<<"\tbr "<<cond<<", "<<case_label<<", "<<next_label<<"\n";
+			out<<case_label<<":\n";
+			string target=string(Symbol(true,func_symbol_val[name]));
+			if(returns_int)
+			{
+				Result now(false,_total++);
+				out<<"\t"<<now<<" = call "<<target<<"(";
+				bool first=true;
+				for(int i=0;i<hidden;++i)
+				{
+					if(!first)
+						out<<", ";
+					first=false;
+					out<<caps[i];
+				}
+				for(int i=0;i<n;++i)
+				{
+					if(!first)
+						out<<", ";
+					first=false;
+					out<<"%a"<<i;
+				}
+				out<<")\n";
+				out<<"\tret "<<now<<"\n";
+			}
+			else
+			{
+				out<<"\tcall "<<target<<"(";
+				bool first=true;
+				for(int i=0;i<hidden;++i)
+				{
+					if(!first)
+						out<<", ";
+					first=false;
+					out<<caps[i];
+				}
+				for(int i=0;i<n;++i)
+				{
+					if(!first)
+						out<<", ";
+					first=false;
+					out<<"%a"<<i;
+				}
+				out<<")\n";
+				out<<"\tret\n";
+			}
+		}
+		out<<env_default<<":\n";
+		if(returns_int)
+			out<<"\tret 0\n";
+		else
+			out<<"\tret\n";
+		out<<direct_label<<":\n";
+		if(cands.empty())
+			out<<"\tjump "<<default_label<<"\n";
+		else
+			out<<"\tjump %"<<helper_name<<"_check_0\n";
+	}
+	else if(cands.empty())
+		out<<"\tjump "<<default_label<<"\n";
+	else
+		out<<"\tjump %"<<helper_name<<"_check_0\n";
+	if(cands.empty())
+	{
+		out<<default_label<<":\n";
+		if(returns_int)
+			out<<"\tret 0\n";
+		else
+			out<<"\tret\n";
+		out<<"}\n";
+		return;
+	}
+	for(size_t idx=0;idx<cands.size();++idx)
+	{
+		string check_label="%"+helper_name+"_check_"+to_string(idx);
+		string case_label="%"+helper_name+"_case_"+to_string(idx);
+		string next_label=(idx+1<cands.size())?"%"+helper_name+"_check_"+to_string(idx+1):default_label;
+		out<<check_label<<":\n";
+		Result cond(false,_total++);
+		out<<"\t"<<cond<<" = eq %fid, "<<cands[idx].first<<"\n";
+		out<<"\tbr "<<cond<<", "<<case_label<<", "<<next_label<<"\n";
+		out<<case_label<<":\n";
+		string target=string(Symbol(true,func_symbol_val[cands[idx].second]));
+		if(returns_int)
+		{
+			Result now(false,_total++);
+			out<<"\t"<<now<<" = call "<<target<<"(";
+			for(int i=0;i<n;++i)
+			{
+				if(i)
+					out<<", ";
+				out<<"%a"<<i;
+			}
+			out<<")\n";
+			out<<"\tret "<<now<<"\n";
+		}
+		else
+		{
+			out<<"\tcall "<<target<<"(";
+			for(int i=0;i<n;++i)
+			{
+				if(i)
+					out<<", ";
+				out<<"%a"<<i;
+			}
+			out<<")\n";
+			out<<"\tret\n";
+		}
+	}
+	out<<default_label<<":\n";
+	if(returns_int)
+		out<<"\tret 0\n";
+	else
+		out<<"\tret\n";
+	out<<"}\n";
+}
+static vector<tuple<int,string,int>> fp_dispatch_candidates(int n,bool returns_int,bool env)
+{
+	vector<tuple<int,string,int>>cands;
+	for(const auto &[name,id]:func_id)
+	{
+		auto it=func_sigs.find(name);
+		if(it==func_sigs.end())
+			continue;
+		const auto &sig=it->second;
+		if(builtin_funcs.count(name)||sig.has_self_param||!sig.all_i32_params||sig.returns_int!=returns_int)
+			continue;
+		if(env)
+		{
+			if(sig.param_count>=n&&sig.param_count<=n+FP_CAP_SLOTS)
+				cands.emplace_back(id,name,sig.param_count-n);
+		}
+		else if(sig.param_count==n)
+			cands.emplace_back(id,name,0);
+	}
+	sort(cands.begin(),cands.end());
+	return cands;
+}
+static void emit_dispatch_chain(const Result &fid,const vector<tuple<int,string,int>> &cands,const vector<Result> &hidden,const vector<Result> &args,bool returns_int,const optional<Symbol> &ret_slot,const string &done,const string &prefix)
+{
+	if(cands.empty())
+	{
+		if(returns_int)
+			_store(Result(true,0),*ret_slot);
+		check_ex();
+		out<<"\tjump "<<done<<"\n";
+		need_jump=false;
+		return;
+	}
+	check_ex();
+	out<<"\tjump "<<prefix<<"_check_0\n";
+	need_jump=false;
+	for(size_t idx=0;idx<cands.size();++idx)
+	{
+		string check_label=prefix+"_check_"+to_string(idx);
+		string case_label=prefix+"_case_"+to_string(idx);
+		string next_label=(idx+1<cands.size())?prefix+"_check_"+to_string(idx+1):prefix+"_default";
+		add_basic_block(check_label);
+		auto [id,name,hidden_count]=cands[idx];
+		Result cond(false,_total++);
+		out<<"\t"<<cond<<" = eq "<<fid<<", "<<id<<"\n";
+		out<<"\tbr "<<cond<<", "<<case_label<<", "<<next_label<<"\n";
+		need_jump=false;
+		add_basic_block(case_label);
+		string target=string(Symbol(true,func_symbol_val[name]));
+		if(returns_int)
+		{
+			Result now(false,_total++);
+			out<<"\t"<<now<<" = call "<<target<<"(";
+			bool first=true;
+			for(int i=0;i<hidden_count&&i<(int)hidden.size();++i)
+			{
+				if(!first)
+					out<<", ";
+				first=false;
+				out<<hidden[i];
+			}
+			for(auto &arg:args)
+			{
+				if(!first)
+					out<<", ";
+				first=false;
+				out<<arg;
+			}
+			out<<")\n";
+			_store(now,*ret_slot);
+		}
+		else
+		{
+			out<<"\tcall "<<target<<"(";
+			bool first=true;
+			for(int i=0;i<hidden_count&&i<(int)hidden.size();++i)
+			{
+				if(!first)
+					out<<", ";
+				first=false;
+				out<<hidden[i];
+			}
+			for(auto &arg:args)
+			{
+				if(!first)
+					out<<", ";
+				first=false;
+				out<<arg;
+			}
+			out<<")\n";
+		}
+		check_ex();
+		out<<"\tjump "<<done<<"\n";
+		need_jump=false;
+	}
+	add_basic_block(prefix+"_default");
+	if(returns_int)
+		_store(Result(true,0),*ret_slot);
+	check_ex();
+	out<<"\tjump "<<done<<"\n";
+	need_jump=false;
+}
+static Result emit_fp_call_inline(const Result &callee_val,const vector<Result> &args,bool returns_int)
+{
+	int id=fp_call_total++;
+	string env_label="%fp_env_"+to_string(id);
+	string direct_label="%fp_direct_"+to_string(id);
+	string done="%fp_done_"+to_string(id);
+	optional<Symbol>ret_slot;
+	if(returns_int)
+		ret_slot=_alloc();
+	check_ex();
+	Result is_env(false,_total++);
+	out<<"\t"<<is_env<<" = ge "<<callee_val<<", "<<FP_ENV_BASE<<"\n";
+	out<<"\tbr "<<is_env<<", "<<env_label<<", "<<direct_label<<"\n";
+	need_jump=false;
+	add_basic_block(env_label);
+	Result row(false,_total++);
+	out<<"\t"<<row<<" = sub "<<callee_val<<", "<<FP_ENV_BASE<<"\n";
+	Result base_pos(false,_total++);
+	out<<"\t"<<base_pos<<" = mul "<<row<<", "<<FP_ENV_WORDS<<"\n";
+	Symbol func_slot(true,_total++);
+	out<<"\t"<<func_slot<<" = getelemptr "<<Symbol(true,func_symbol_val["__fp_env"])<<", "<<base_pos<<"\n";
+	Result real_fid(false,_total++);
+	out<<"\t"<<real_fid<<" = load "<<func_slot<<"\n";
+	vector<Result>hidden;
+	for(int i=0;i<FP_CAP_SLOTS;++i)
+	{
+		Result pos(false,_total++);
+		out<<"\t"<<pos<<" = add "<<base_pos<<", "<<(i+1)<<"\n";
+		Symbol slot(true,_total++);
+		out<<"\t"<<slot<<" = getelemptr "<<Symbol(true,func_symbol_val["__fp_env"])<<", "<<pos<<"\n";
+		Result cap(false,_total++);
+		out<<"\t"<<cap<<" = load "<<slot<<"\n";
+		hidden.push_back(cap);
+	}
+	emit_dispatch_chain(real_fid,fp_dispatch_candidates((int)args.size(),returns_int,true),hidden,args,returns_int,ret_slot,done,"%fp_env_dispatch_"+to_string(id));
+	add_basic_block(direct_label);
+	vector<Result>no_hidden;
+	emit_dispatch_chain(callee_val,fp_dispatch_candidates((int)args.size(),returns_int,false),no_hidden,args,returns_int,ret_slot,done,"%fp_direct_dispatch_"+to_string(id));
+	add_basic_block(done);
+	if(returns_int)
+		return _load(*ret_slot);
+	return Result();
+}
+static void visit_lambdas(const node &n,vector<const LambdaExpAST*> &order,unordered_set<const LambdaExpAST*> &seen)
+{
+	if(!n)
+		return;
+	if(auto l=dynamic_cast<LambdaExpAST*>(n.get()))
+	{
+		l->pre_register();
+		if(l->block)
+			visit_lambdas(l->block,order,seen);
+		if(!seen.count(l))
+		{
+			seen.insert(l);
+			order.push_back(l);
+		}
+		return;
+	}
+	if(auto p=dynamic_cast<PrimaryExpAST*>(n.get()))
+	{
+		if(p->lval.has_value())
+			visit_lambdas(*p->lval,order,seen);
+		if(p->exp)
+			visit_lambdas(p->exp,order,seen);
+		return;
+	}
+	if(auto u=dynamic_cast<UnaryExpAST*>(n.get()))
+	{
+		if(u->exp)
+			visit_lambdas(u->exp,order,seen);
+		if(u->params)
+			for(auto &x:*u->params)
+				visit_lambdas(x,order,seen);
+		return;
+	}
+	if(auto b=dynamic_cast<MulExpAST*>(n.get())){visit_lambdas(b->unary_exp,order,seen);if(b->value.has_value())visit_lambdas(b->value->first,order,seen);return;}
+	if(auto a=dynamic_cast<AddExpAST*>(n.get())){visit_lambdas(a->mul_exp,order,seen);if(a->value.has_value())visit_lambdas(a->value->first,order,seen);return;}
+	if(auto r=dynamic_cast<RelExpAST*>(n.get())){visit_lambdas(r->add_exp,order,seen);if(r->value.has_value())visit_lambdas(r->value->first,order,seen);return;}
+	if(auto e=dynamic_cast<EqExpAST*>(n.get())){visit_lambdas(e->rel_exp,order,seen);if(e->value.has_value())visit_lambdas(e->value->first,order,seen);return;}
+	if(auto nd=dynamic_cast<AndExpAST*>(n.get())){visit_lambdas(nd->eq_exp,order,seen);if(nd->value.has_value())visit_lambdas(nd->value->first,order,seen);return;}
+	if(auto o=dynamic_cast<OrExpAST*>(n.get())){visit_lambdas(o->and_exp,order,seen);if(o->value.has_value())visit_lambdas(o->value->first,order,seen);return;}
+	if(auto e=dynamic_cast<ExpAST*>(n.get())){visit_lambdas(e->exp,order,seen);return;}
+	if(auto lv=dynamic_cast<LValAST*>(n.get())){if(lv->exps)for(auto &x:*lv->exps)visit_lambdas(x,order,seen);return;}
+	if(auto s=dynamic_cast<MatchedStmtAST*>(n.get())){if(s->lval.has_value())visit_lambdas(*s->lval,order,seen);if(s->exp.has_value())visit_lambdas(*s->exp,order,seen);if(s->block.has_value())visit_lambdas(*s->block,order,seen);if(s->stmt1)visit_lambdas(s->stmt1,order,seen);if(s->stmt2)visit_lambdas(s->stmt2,order,seen);return;}
+	if(auto d=dynamic_cast<DanglingStmtAST*>(n.get())){visit_lambdas(d->exp,order,seen);if(d->stmt1)visit_lambdas(d->stmt1,order,seen);if(d->stmt2)visit_lambdas(d->stmt2,order,seen);return;}
+	if(auto s=dynamic_cast<StmtAST*>(n.get())){visit_lambdas(s->stmt,order,seen);return;}
+	if(auto b=dynamic_cast<BlockAST*>(n.get())){if(b->blocks)for(auto &x:*b->blocks)visit_lambdas(x,order,seen);return;}
+	if(auto bi=dynamic_cast<BlockItemAST*>(n.get())){visit_lambdas(bi->block,order,seen);return;}
+	if(auto vd=dynamic_cast<VarDefAST*>(n.get())){if(vd->init.has_value())visit_lambdas(*vd->init,order,seen);if(vd->exps)for(auto &x:*vd->exps)visit_lambdas(x,order,seen);return;}
+	if(auto d=dynamic_cast<DeclAST*>(n.get())){visit_lambdas(d->decl,order,seen);return;}
+	if(auto v=dynamic_cast<VarDeclAST*>(n.get())){if(v->defs)for(auto &x:*v->defs)visit_lambdas(x,order,seen);return;}
+	if(auto cd=dynamic_cast<ConstDefAST*>(n.get())){if(cd->init)visit_lambdas(cd->init,order,seen);if(cd->exps)for(auto &x:*cd->exps)visit_lambdas(x,order,seen);return;}
+	if(auto cd=dynamic_cast<ConstDeclAST*>(n.get())){if(cd->defs)for(auto &x:*cd->defs)visit_lambdas(x,order,seen);return;}
+	if(auto i=dynamic_cast<InitValAST*>(n.get())){if(i->exp.has_value())visit_lambdas(*i->exp,order,seen);if(i->inits)for(auto &x:*i->inits)visit_lambdas(x,order,seen);return;}
+	if(auto fd=dynamic_cast<FuncDefAST*>(n.get())){if(fd->block)visit_lambdas(fd->block,order,seen);return;}
+	if(auto f=dynamic_cast<FuncFParamAST*>(n.get())){if(f->exps)for(auto &x:*f->exps)visit_lambdas(x,order,seen);return;}
 }
 static Result _add(const Result &lhs,const Result &rhs)
 {
@@ -253,28 +661,97 @@ Result ProgramAST::print()const
 {
 	if(debug_flag)
 		out<<"Program :\n";
+	if(!func_symbol_val.count("__fp_env_sp"))
+	{
+		Symbol sp_sym(true,_total++);
+		Symbol env_sym(true,_total++);
+		func_symbol_val["__fp_env_sp"]=sp_sym.value;
+		func_symbol_val["__fp_env"]=env_sym.value;
+		symbol_table["__fp_env_sp"]=sp_sym;
+		symbol_table["__fp_env"]=env_sym;
+	}
 	for(const auto &def:*defs)
 		def->pre_register();
-	for(int n=0;n<=8;++n)
+	out<<"global "<<Symbol(true,func_symbol_val["__fp_env_sp"])<<" = alloc i32, zeroinit\n";
+	out<<"global "<<Symbol(true,func_symbol_val["__fp_env"])<<" = alloc [i32, "<<(FP_ENV_LIMIT*FP_ENV_WORDS)<<"], zeroinit\n";
+	vector<const LambdaExpAST*>lambda_emit_order;
+	unordered_set<const LambdaExpAST*>seen_lambdas;
+	for(const auto &def:*defs)
+		visit_lambdas(def,lambda_emit_order,seen_lambdas);
+	unordered_map<const LambdaExpAST*,int>lambda_index,indeg;
+	unordered_map<const LambdaExpAST*,vector<const LambdaExpAST*>>lambda_next;
+	for(size_t i=0;i<lambda_emit_order.size();++i)
 	{
-		out<<"decl @__fp_"<<n<<"_i32(i32";
-		for(int j=0;j<n;++j)
-			out<<", i32";
-		out<<"): i32\n";
-		out<<"decl @__fp_"<<n<<"_void(i32";
-		for(int j=0;j<n;++j)
-			out<<", i32";
-		out<<")\n";
+		lambda_index[lambda_emit_order[i]]=(int)i;
+		indeg[lambda_emit_order[i]]=0;
 	}
+	auto add_lambda_edge=[&](const LambdaExpAST *before,const LambdaExpAST *after)
+	{
+		if(!before||!after||before==after)
+			return;
+		if(!lambda_index.count(before)||!lambda_index.count(after))
+			return;
+		auto &next=lambda_next[before];
+		if(find(next.begin(),next.end(),after)!=next.end())
+			return;
+		next.push_back(after);
+		++indeg[after];
+	};
+	for(const auto *lambda:lambda_emit_order)
+	{
+		vector<const LambdaExpAST*>nested;
+		unordered_set<const LambdaExpAST*>seen_nested;
+		if(lambda->block)
+			visit_lambdas(lambda->block,nested,seen_nested);
+		for(const auto *child:nested)
+			add_lambda_edge(child,lambda);
+	}
+	vector<const LambdaExpAST*>ordered_lambdas;
+	unordered_set<const LambdaExpAST*>emitted_lambdas;
+	auto better_lambda=[&](const LambdaExpAST *a,const LambdaExpAST *b)
+	{
+		if(a->has_self!=b->has_self)
+			return !a->has_self;
+		if(a->captures.size()!=b->captures.size())
+			return a->captures.size()<b->captures.size();
+		return lambda_index[a]<lambda_index[b];
+	};
+	while(ordered_lambdas.size()<lambda_emit_order.size())
+	{
+		const LambdaExpAST *best=nullptr;
+		for(const auto *lambda:lambda_emit_order)
+		{
+			if(emitted_lambdas.count(lambda)||indeg[lambda]!=0)
+				continue;
+			if(!best||better_lambda(lambda,best))
+				best=lambda;
+		}
+		if(!best)
+		{
+			for(const auto *lambda:lambda_emit_order)
+				if(!emitted_lambdas.count(lambda))
+				{
+					best=lambda;
+					break;
+				}
+		}
+		emitted_lambdas.insert(best);
+		ordered_lambdas.push_back(best);
+		for(const auto *next:lambda_next[best])
+			--indeg[next];
+	}
+	lambda_emit_order=ordered_lambdas;
 	symbol_stack.push_back({});
-	auto emit=[&](bool fp)
+	auto emit=[&](bool fp,bool include_main)
 	{
 		for(const auto &def:*defs)
 		{
 			if(def->has_func_ptr_params()==fp)
 			{
 				auto fd=dynamic_cast<FuncDefAST*>(def.get());
-				if(fd&&fd->ident=="main")
+				if(fd&&fd->ident=="main"&&!include_main)
+					continue;
+				if(fd&&fd->ident!="main"&&include_main)
 					continue;
 				if(fd&&!builtin_funcs.count(fd->ident))
 					func_id[fd->ident]=next_func_id++;
@@ -283,25 +760,32 @@ Result ProgramAST::print()const
 			}
 		}
 	};
-	emit(false);
-	emit(true);
-	for(const auto &def:*defs)
+	emit(false,false);
+	for(const auto *lambda:lambda_emit_order)
+		lambda->print_body();
+	for(int n=0;n<=16;++n)
 	{
-		auto fd=dynamic_cast<FuncDefAST*>(def.get());
-		if(fd&&fd->ident=="main")
-		{
-			is_global=true;
-			def->print();
-		}
+		emit_fp_helper(n,true);
+		emit_fp_helper(n,false);
 	}
-	for(size_t i=0;i<pending_lambdas.size();++i)
-		pending_lambdas[i]->print_body();
+	emit(true,false);
+	emit(false,true);
 	return Result();
 }
 static vector<pair<Symbol,bool>>def_params; // ptr : true, value : false
 void FuncDefAST::pre_register()const
 {
-	func_sigs[ident]={(int)params->size(),!type.empty()};
+	bool all_i32_params=true;
+	for(const auto &param:*params)
+	{
+		auto fp=dynamic_cast<FuncFParamAST*>(param.get());
+		if(fp&&fp->ptr)
+		{
+			all_i32_params=false;
+			break;
+		}
+	}
+	func_sigs[ident]={(int)params->size(),!type.empty(),all_i32_params,false};
 	if(!builtin_funcs.count(ident))
 	{
 		if(type.empty())
@@ -320,12 +804,13 @@ bool FuncDefAST::has_func_ptr_params()const
 			return true;
 	return false;
 }
+static void walk_decls(const node &n,unordered_set<string>&declared);
 static void walk_ast(const node &n,unordered_set<string>&found)
 {
 	if(!n) return;
 	if(auto lv=dynamic_cast<LValAST*>(n.get())){found.insert(lv->ident);return;}
 	if(auto p=dynamic_cast<PrimaryExpAST*>(n.get())){if(p->lval.has_value())walk_ast(*p->lval,found);else if(p->exp)walk_ast(p->exp,found);return;}
-	if(auto u=dynamic_cast<UnaryExpAST*>(n.get())){if(u->func){if(u->params)for(auto &x:*u->params)walk_ast(x,found);}else if(u->exp)walk_ast(u->exp,found);return;}
+	if(auto u=dynamic_cast<UnaryExpAST*>(n.get())){if(u->func){if(u->fname.has_value())found.insert(*u->fname);if(u->params)for(auto &x:*u->params)walk_ast(x,found);else if(u->exp)walk_ast(u->exp,found);}else if(u->exp)walk_ast(u->exp,found);return;}
 	if(auto b=dynamic_cast<MulExpAST*>(n.get())){walk_ast(b->unary_exp,found);if(b->value.has_value())walk_ast(b->value->first,found);return;}
 	if(auto a=dynamic_cast<AddExpAST*>(n.get())){walk_ast(a->mul_exp,found);if(a->value.has_value())walk_ast(a->value->first,found);return;}
 	if(auto r=dynamic_cast<RelExpAST*>(n.get())){walk_ast(r->add_exp,found);if(r->value.has_value())walk_ast(r->value->first,found);return;}
@@ -342,7 +827,27 @@ static void walk_ast(const node &n,unordered_set<string>&found)
 	if(auto d=dynamic_cast<DeclAST*>(n.get())){walk_ast(d->decl,found);return;}
 	if(auto v=dynamic_cast<VarDeclAST*>(n.get())){if(v->defs)for(auto &x:*v->defs)walk_ast(x,found);return;}
 	if(auto i=dynamic_cast<InitValAST*>(n.get())){if(i->exp.has_value())walk_ast(*i->exp,found);if(i->inits)for(auto &x:*i->inits)walk_ast(x,found);return;}
-	if(auto l=dynamic_cast<LambdaExpAST*>(n.get())){if(l->block)walk_ast(l->block,found);return;}
+	if(auto l=dynamic_cast<LambdaExpAST*>(n.get()))
+	{
+		unordered_set<string>inner_found;
+		if(l->block)
+			walk_ast(l->block,inner_found);
+		unordered_set<string>inner_params;
+		for(auto &p:*l->params)
+		{
+			auto lp=dynamic_cast<LambdaParamAST*>(p.get());
+			inner_params.insert(lp->ident);
+		}
+		if(l->has_self)
+			inner_params.insert(l->self_name);
+		unordered_set<string>inner_declared;
+		if(l->block)
+			walk_decls(l->block,inner_declared);
+		for(auto &id:inner_found)
+			if(!inner_params.count(id)&&!inner_declared.count(id))
+				found.insert(id);
+		return;
+	}
 }
 static void walk_decls(const node &n,unordered_set<string>&declared)
 {
@@ -395,41 +900,48 @@ void LambdaExpAST::pre_register()const
 	collect_captures();
 	int total_params=captures.size()+user_count+(has_self?1:0);
 	func_id[lambda_name]=next_func_id++;
-	func_sigs[lambda_name]={total_params,!type.empty()};
+	func_sigs[lambda_name]={total_params,!type.empty(),true,has_self};
 	func_table[lambda_name]=!type.empty();
 	if(!builtin_funcs.count(lambda_name)){Symbol now(true,_total++);symbol_table[lambda_name]=now;func_symbol_val[lambda_name]=now.value;}
-	if(captures.size()>0){thunk_name="__thunk_"+to_string(next_thunk_id++);ThunkInfo info;info.thunk_name=thunk_name;info.real_lambda_name=lambda_name;info.capture_names=captures;info.user_param_count=user_count;info.cap_count=(int)captures.size();info.ret_type=type.empty()?"":": i32";pending_thunks.push_back(info);}
-	pending_lambdas.push_back(this);
 }
 Result LambdaExpAST::print()const
 {
 	if(lambda_name.empty())
 		pre_register();
-	if(capture_count()==0||in_auto_def)
-		return Result(true,func_id[lambda_name]);
-	int K=capture_count();
-	Result sp(false,_total++);
-	out<<"\t"<<sp<<" = load @"<<thunk_name<<"_sp\n";
-	need_jump=true;
-	Result acc(false,_total++);
-	if(K==1) acc=sp;
-	else{out<<"\t"<<acc<<" = add 0, 0\n";for(int i=0;i<K;++i){Result tmp(false,_total++);out<<"\t"<<tmp<<" = add "<<acc<<", "<<sp<<"\n";acc=tmp;}}
-	Result ns(false,_total++);
-	out<<"\t"<<ns<<" = add "<<sp<<", 1\n";
-	out<<"\tstore "<<ns<<", @"<<thunk_name<<"_sp\n";
-	for(int i=0;i<K;++i)
+	if(capture_count()>0&&!in_auto_def)
 	{
-		Result offset;
-		if(i==0) offset=acc;
-		else{offset=Result(false,_total++);out<<"\t"<<offset<<" = add "<<acc<<", "<<i<<"\n";}
-		Symbol slot(true,_total++);
-		out<<"\t"<<slot<<" = getelemptr @"<<thunk_name<<"_stack, "<<offset<<"\n";
-		ptr_value.insert(slot);
-		Result val=_load(symbol_table[captures[i]]);
-		_store(val,slot);
+		vector<Result>cap_vals;
+		for(const auto &cap_name:captures)
+		{
+			Symbol var_sym;
+			auto sym_it=symbol_table.find(cap_name);
+			if(sym_it!=symbol_table.end())
+				var_sym=sym_it->second;
+			if(!var_sym.addr)
+			{
+				auto cl=closure_layouts.find(current_lambda_func_name);
+				if(cl!=closure_layouts.end())
+				{
+					for(size_t ci=0;ci<cl->second.capture_names.size()&&ci<cl->second.cap_slots.size();++ci)
+					{
+						if(cl->second.capture_names[ci]==cap_name)
+						{
+							var_sym=cl->second.cap_slots[ci];
+							break;
+						}
+					}
+				}
+			}
+			if(var_sym.addr)
+				cap_vals.push_back(_load(var_sym));
+			else if(func_id.count(cap_name))
+				cap_vals.push_back(Result(true,func_id[cap_name]));
+			else
+				cap_vals.push_back(Result(true,0));
+		}
+		return fp_env_store_new(Result(true,func_id[lambda_name]),cap_vals);
 	}
-	need_jump=true;
-	return Result(true,func_id[thunk_name]);
+	return Result(true,func_id[lambda_name]);
 }
 void LambdaExpAST::print_body()const
 {
@@ -440,7 +952,18 @@ void LambdaExpAST::print_body()const
 	Symbol self_param_sym;
 	if(has_self){self_param_sym=Symbol(true,_total++);out<<self_param_sym<<"_: i32";first=false;}
 	for(size_t i=0;i<captures.size();++i){if(!first)out<<", ";first=false;cap_param_syms[i]=Symbol(true,_total++);out<<cap_param_syms[i]<<"_: i32";}
-	for(const auto &p:*params){auto lp=dynamic_cast<LambdaParamAST*>(p.get());if(lp->is_self)continue;if(!first)out<<", ";first=false;Symbol now(true,_total++);symbol_insert(lp->ident,now);out<<now<<"_: i32";}
+	for(const auto &p:*params)
+	{
+		auto lp=dynamic_cast<LambdaParamAST*>(p.get());
+		if(lp->is_self)
+			continue;
+		if(!first)
+			out<<", ";
+		first=false;
+		Symbol now(true,_total++);
+		symbol_insert(lp->ident,now);
+		out<<now<<"_: i32";
+	}
 	out<<")"<<type<<" {\n";
 	string entry_label=string(Symbol(true,func_symbol_val[lambda_name]));
 	entry_label.erase(entry_label.begin());
@@ -461,6 +984,12 @@ void LambdaExpAST::print_body()const
 		out<<"\t"<<now<<" = alloc i32\n";
 		out<<"\tstore "<<it->second<<"_, "<<now<<"\n";
 		symbol_insert(lp->ident,now);
+		if(lp->is_fp)
+		{
+			ClosureLayout pcl;
+			pcl.func_slot=now;
+			closure_layouts[lp->ident]=pcl;
+		}
 	}
 	first_block=false;
 	self_params.clear();
@@ -806,7 +1335,7 @@ Result VarDefAST::print()const
 		_store(fid,now);
 		int K=lambda->capture_count();
 		vector<Symbol>cap_slots(K);
-		for(int i=0;i<K;++i){cap_slots[i]=_alloc();string cap_name=lambda->captures[i];Symbol var_sym=symbol_table[cap_name];if(!var_sym.addr){auto cl=closure_layouts.find(current_lambda_func_name);if(cl!=closure_layouts.end()){auto &cn=cl->second.capture_names;auto &cs=cl->second.cap_slots;for(size_t ci=0;ci<cn.size();++ci)if(cn[ci]==cap_name&&ci<cs.size()){var_sym=cs[ci];break;}}}if(!var_sym.addr)continue;Result val=_load(var_sym);_store(val,cap_slots[i]);}
+		for(int i=0;i<K;++i){cap_slots[i]=_alloc();string cap_name=lambda->captures[i];Symbol var_sym;auto sym_it=symbol_table.find(cap_name);if(sym_it!=symbol_table.end())var_sym=sym_it->second;if(!var_sym.addr){auto cl=closure_layouts.find(current_lambda_func_name);if(cl!=closure_layouts.end()){auto &cn=cl->second.capture_names;auto &cs=cl->second.cap_slots;for(size_t ci=0;ci<cn.size();++ci)if(cn[ci]==cap_name&&ci<cs.size()){var_sym=cs[ci];break;}}}if(!var_sym.addr){if(func_id.count(cap_name))_store(Result(true,func_id[cap_name]),cap_slots[i]);continue;}Result val=_load(var_sym);_store(val,cap_slots[i]);}
 		symbol_insert(ident,now);
 		ClosureLayout cl;cl.func_slot=now;cl.cap_slots=cap_slots;cl.capture_names=lambda->captures;cl.user_param_count=lambda->user_count;cl.has_self=lambda->has_self;cl.has_captures=(K>0);cl.cap_count=K;cl.lambda_func_name=lambda->lambda_name;closure_layouts[ident]=cl;
 		return fid;
@@ -1082,12 +1611,21 @@ Result UnaryExpAST::print()const
 			Result self_val=_load(self_sym);
 			string lambda_sym=string(Symbol(true,func_symbol_val[current_lambda_func_name]));
 			returns_int=!func_table[current_lambda_func_name]?false:true;
+			vector<Result>current_caps;
+			auto self_layout=closure_layouts.find(current_lambda_func_name);
+			if(self_layout!=closure_layouts.end())
+			{
+				for(auto &slot:self_layout->second.cap_slots)
+					current_caps.push_back(_load(slot));
+			}
 			check_ex();
 			if(returns_int)
 			{
 				Result now(false,_total++);
 				out<<"\t"<<now<<" = call "<<lambda_sym<<"(";
 				out<<self_val;
+				for(auto &cap:current_caps)
+					out<<", "<<cap;
 				for(int i=1;i<size;++i) out<<", "<<result[i];
 				out<<")\n";
 				need_jump=true;
@@ -1097,14 +1635,127 @@ Result UnaryExpAST::print()const
 			{
 				out<<"\tcall "<<lambda_sym<<"(";
 				out<<self_val;
+				for(auto &cap:current_caps)
+					out<<", "<<cap;
 				for(int i=1;i<size;++i) out<<", "<<result[i];
 				out<<")\n";
 				need_jump=true;
 				return Result();
 			}
 		}
+		if(fname.has_value())
+		{
+			auto cl=closure_layouts.find(*fname);
+			if(cl!=closure_layouts.end()&&!cl->second.lambda_func_name.empty())
+			{
+				const auto &layout=cl->second;
+				string lambda_sym=string(Symbol(true,func_symbol_val[layout.lambda_func_name]));
+				returns_int=func_table[layout.lambda_func_name];
+				vector<Result>cap_vals;
+				int n=layout.cap_count>0?layout.cap_count:(int)layout.cap_slots.size();
+				for(int i=0;i<n;++i)
+					cap_vals.push_back(_load(layout.cap_slots[i]));
+				check_ex();
+				if(returns_int)
+				{
+					Result now(false,_total++);
+					out<<"\t"<<now<<" = call "<<lambda_sym<<"(";
+					bool first=true;
+					if(layout.has_self)
+					{
+						out<<"0";
+						first=false;
+					}
+					for(auto &cv:cap_vals)
+					{
+						if(!first)
+							out<<", ";
+						first=false;
+						out<<cv;
+					}
+					for(int i=layout.has_self?1:0;i<size;++i)
+					{
+						if(!first)
+							out<<", ";
+						first=false;
+						out<<result[i];
+					}
+					out<<")\n";
+					need_jump=true;
+					return now;
+				}
+				out<<"\tcall "<<lambda_sym<<"(";
+				bool first=true;
+				if(layout.has_self)
+				{
+					out<<"0";
+					first=false;
+				}
+				for(auto &cv:cap_vals)
+				{
+					if(!first)
+						out<<", ";
+					first=false;
+					out<<cv;
+				}
+				for(int i=layout.has_self?1:0;i<size;++i)
+				{
+					if(!first)
+						out<<", ";
+					first=false;
+					out<<result[i];
+				}
+				out<<")\n";
+				need_jump=true;
+				return Result();
+			}
+		}
+		if(!fname.has_value()&&exp)
+		{
+			if(auto l=dynamic_cast<LambdaExpAST*>(exp.get()))
+			{
+				if(l->lambda_name.empty())
+					l->pre_register();
+				string lambda_sym=string(Symbol(true,func_symbol_val[l->lambda_name]));
+				returns_int=func_table[l->lambda_name];
+				check_ex();
+				if(returns_int)
+				{
+					Result now(false,_total++);
+					out<<"\t"<<now<<" = call "<<lambda_sym<<"(";
+					for(int i=0;i<size;++i)
+					{
+						if(i)
+							out<<", ";
+						out<<result[i];
+					}
+					out<<")\n";
+					need_jump=true;
+					return now;
+				}
+				out<<"\tcall "<<lambda_sym<<"(";
+				for(int i=0;i<size;++i)
+				{
+					if(i)
+						out<<", ";
+					out<<result[i];
+				}
+				out<<")\n";
+				need_jump=true;
+				return Result();
+			}
+		}
 		Result callee_val;
-		if(fname.has_value()){auto sym=symbol_table[*fname];callee_val=_load(sym);}
+		if(fname.has_value())
+		{
+			auto sym_it=symbol_table.find(*fname);
+			if(sym_it!=symbol_table.end()&&sym_it->second.addr)
+				callee_val=_load(sym_it->second);
+			else if(func_id.count(*fname))
+				callee_val=Result(true,func_id[*fname]);
+			else
+				callee_val=Result(true,0);
+		}
 		else callee_val=exp->print();
 		vector<Result>cap_vals;bool has_slf=false;
 		if(fname.has_value()){auto cl=closure_layouts.find(*fname);if(cl!=closure_layouts.end()){if(!cl->second.lambda_func_name.empty()||cl->second.has_self||cl->second.has_captures){int n=cl->second.cap_count>0?cl->second.cap_count:(int)cl->second.cap_slots.size();for(int i=0;i<n;++i)cap_vals.push_back(_load(cl->second.cap_slots[i]));}if(cl->second.has_self)has_slf=true;}}
@@ -1114,7 +1765,9 @@ Result UnaryExpAST::print()const
 			{
 				if(builtin_funcs.count(fn))
 					continue;
-				if(sig.param_count!=size)
+				if(sig.has_self_param)
+					continue;
+				if(sig.param_count<size||sig.param_count>size+FP_CAP_SLOTS)
 					continue;
 				if(sig.returns_int)
 					has_int=true;
@@ -1128,11 +1781,14 @@ Result UnaryExpAST::print()const
 			else
 				returns_int=true;
 		}
-		string ret_str=returns_int?"i32":"void";
-		string sentinel="@__fp_"+to_string(size+cap_vals.size())+"_"+ret_str;
-		check_ex();
-		if(returns_int){Result now(false,_total++);out<<"\t"<<now<<" = call "<<sentinel<<"(";out<<callee_val;if(has_slf)out<<", 0";for(auto &cv:cap_vals)out<<", "<<cv;for(int i=has_slf?1:0;i<size;++i)out<<", "<<result[i];out<<")\n";need_jump=true;return now;}
-		else{out<<"\tcall "<<sentinel<<"(";out<<callee_val;if(has_slf)out<<", 0";for(auto &cv:cap_vals)out<<", "<<cv;for(int i=has_slf?1:0;i<size;++i)out<<", "<<result[i];out<<")\n";need_jump=true;return Result();}
+		vector<Result>call_args;
+		if(has_slf)
+			call_args.push_back(Result(true,0));
+		for(auto &cv:cap_vals)
+			call_args.push_back(cv);
+		for(int i=has_slf?1:0;i<size;++i)
+			call_args.push_back(result[i]);
+		return emit_fp_call_inline(callee_val,call_args,returns_int);
 	}
 	if(!op.has_value())
 	{

@@ -5,7 +5,7 @@
 #include <stdint.h>
 #if defined(_WIN32) || defined(_WIN64)
 #define KOOPA_OS_WINDOWS
-#include <Windows.h>
+typedef void *HANDLE;
 #endif
 
 #ifdef __cplusplus

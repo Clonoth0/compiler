@@ -230,8 +230,8 @@ class LambdaParamAST:public BaseAST
 {
 	public:
 		string ident;
-		bool is_self;
-		bool is_fp;
+		bool is_self=false;
+		bool is_fp=false;
 		Result print()const override{return Result();}
 };
 class LambdaExpAST:public BaseAST
@@ -259,10 +259,13 @@ struct ClosureLayout
 	Symbol func_slot;
 	vector<Symbol>cap_slots;
 	vector<string>capture_names;
-	int user_param_count;
-	bool has_self;
-	bool has_captures;
-	int cap_count;
+	vector<int>capture_offsets;
+	bool capture_by_ref=false;
+	int user_param_count=0;
+	vector<bool>param_is_fp;
+	bool has_self=false;
+	bool has_captures=false;
+	int cap_count=0;
 	string lambda_func_name;
 };
 class ExpAST:public BaseAST
