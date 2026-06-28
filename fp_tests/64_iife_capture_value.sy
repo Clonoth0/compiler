@@ -1,0 +1,1 @@
+int main(){int n=7;int a=[=](int x)->int{return x+n;}(5);n=20;return a+n;}

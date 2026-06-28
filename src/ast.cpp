@@ -204,6 +204,46 @@ static Symbol source_slot_for_auto_capture(const string &cap_name,bool want_ref)
 	}
 	return Symbol();
 }
+static bool layout_needs_ref_abi(const ClosureLayout &layout)
+{
+	for(bool by_ref:layout.capture_is_ref)
+		if(by_ref)
+			return true;
+	return false;
+}
+static vector<Result> capture_args_for_layout(const ClosureLayout &layout,bool use_ref_abi)
+{
+	vector<Result>cap_vals;
+	int n=layout.cap_count>0?layout.cap_count:(int)layout.cap_slots.size();
+	for(int i=0;i<n;++i)
+	{
+		bool by_ref=use_ref_abi&&i<(int)layout.capture_is_ref.size()&&layout.capture_is_ref[i]&&i<(int)layout.capture_ref_slots.size()&&layout.capture_ref_slots[i].addr;
+		if(by_ref)
+			cap_vals.push_back(Result(layout.capture_ref_slots[i]));
+		else
+			cap_vals.push_back(_load(layout.cap_slots[i]));
+	}
+	return cap_vals;
+}
+static vector<Result> capture_args_for_lambda_expr(const LambdaExpAST *lambda,bool use_ref_abi)
+{
+	vector<Result>cap_vals;
+	for(size_t i=0;i<lambda->captures.size();++i)
+	{
+		bool by_ref=use_ref_abi&&i<lambda->capture_is_ref.size()&&lambda->capture_is_ref[i];
+		if(by_ref)
+		{
+			Symbol ref_slot=source_slot_for_auto_capture(lambda->captures[i],true);
+			if(ref_slot.addr)
+			{
+				cap_vals.push_back(Result(ref_slot));
+				continue;
+			}
+		}
+		cap_vals.push_back(load_capture_value(lambda->captures[i]));
+	}
+	return cap_vals;
+}
 static Result _add(const Result &lhs,const Result &rhs);
 static Result _mul(const Result &lhs,const Result &rhs);
 static Result fp_env_store_new(const Result &func_value,const vector<Result> &captures)
@@ -1760,23 +1800,12 @@ Result UnaryExpAST::print()const
 			{
 				const auto &layout=cl->second;
 				string call_lambda_name=layout.lambda_func_name;
-				bool use_ref_abi=false;
-				for(bool by_ref:layout.capture_is_ref)
-					use_ref_abi=use_ref_abi||by_ref;
+				bool use_ref_abi=layout_needs_ref_abi(layout);
 				if(use_ref_abi&&!layout.ref_lambda_func_name.empty())
 					call_lambda_name=layout.ref_lambda_func_name;
 				string lambda_sym=string(Symbol(true,func_symbol_val[call_lambda_name]));
 				returns_int=func_table[call_lambda_name];
-				vector<Result>cap_vals;
-				int n=layout.cap_count>0?layout.cap_count:(int)layout.cap_slots.size();
-				for(int i=0;i<n;++i)
-				{
-					bool by_ref=use_ref_abi&&i<(int)layout.capture_is_ref.size()&&layout.capture_is_ref[i]&&i<(int)layout.capture_ref_slots.size()&&layout.capture_ref_slots[i].addr;
-					if(by_ref)
-						cap_vals.push_back(Result(layout.capture_ref_slots[i]));
-					else
-						cap_vals.push_back(_load(layout.cap_slots[i]));
-				}
+				vector<Result>cap_vals=capture_args_for_layout(layout,use_ref_abi);
 				check_ex();
 				if(returns_int)
 				{
@@ -1838,17 +1867,31 @@ Result UnaryExpAST::print()const
 			{
 				if(l->lambda_name.empty())
 					l->pre_register();
-				string lambda_sym=string(Symbol(true,func_symbol_val[l->lambda_name]));
-				returns_int=func_table[l->lambda_name];
+				bool use_ref_abi=false;
+				for(bool by_ref:l->capture_is_ref)
+					use_ref_abi=use_ref_abi||by_ref;
+				string call_lambda_name=(use_ref_abi&&!l->ref_lambda_name.empty())?l->ref_lambda_name:l->lambda_name;
+				string lambda_sym=string(Symbol(true,func_symbol_val[call_lambda_name]));
+				returns_int=func_table[call_lambda_name];
+				vector<Result>cap_vals=capture_args_for_lambda_expr(l,use_ref_abi);
 				check_ex();
 				if(returns_int)
 				{
 					Result now(false,_total++);
 					out<<"\t"<<now<<" = call "<<lambda_sym<<"(";
+					bool first=true;
+					for(auto &cv:cap_vals)
+					{
+						if(!first)
+							out<<", ";
+						first=false;
+						out<<cv;
+					}
 					for(int i=0;i<size;++i)
 					{
-						if(i)
+						if(!first)
 							out<<", ";
+						first=false;
 						out<<result[i];
 					}
 					out<<")\n";
@@ -1856,10 +1899,19 @@ Result UnaryExpAST::print()const
 					return now;
 				}
 				out<<"\tcall "<<lambda_sym<<"(";
+				bool first=true;
+				for(auto &cv:cap_vals)
+				{
+					if(!first)
+						out<<", ";
+					first=false;
+					out<<cv;
+				}
 				for(int i=0;i<size;++i)
 				{
-					if(i)
+					if(!first)
 						out<<", ";
+					first=false;
 					out<<result[i];
 				}
 				out<<")\n";
