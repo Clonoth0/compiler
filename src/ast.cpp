@@ -712,7 +712,8 @@ Result ProgramAST::print()const
 		func_symbol_val["__fp_env_sp"]=sp_sym.value;
 		func_symbol_val["__fp_env"]=env_sym.value;
 		symbol_table["__fp_env_sp"]=sp_sym;
-		symbol_table["__fp_env"]=env_sym;
+		if(!symbol_table.count("__fp_env"))
+			symbol_table["__fp_env"]=env_sym;
 	}
 	for(const auto &def:*defs)
 		def->pre_register();
@@ -857,7 +858,7 @@ void FuncDefAST::pre_register()const
 		}
 	}
 	func_sigs[ident]={(int)params->size(),!type.empty(),all_i32_params,false};
-	if(!builtin_funcs.count(ident))
+	if(!builtin_funcs.count(ident)&&ident!="__fp_env"&&ident!="__fp_env_sp")
 	{
 		if(type.empty())
 			func_table[ident]=false;
@@ -974,7 +975,7 @@ void LambdaExpAST::pre_register()const
 	int total_params=captures.size()+user_count+(has_self?1:0);
 	func_sigs[lambda_name]={total_params,!type.empty(),true,has_self};
 	func_table[lambda_name]=!type.empty();
-	if(!builtin_funcs.count(lambda_name)){Symbol now(true,_total++);symbol_table[lambda_name]=now;func_symbol_val[lambda_name]=now.value;}
+	if(!builtin_funcs.count(lambda_name)){Symbol now(true,_total++);if(!symbol_table.count(lambda_name))symbol_table[lambda_name]=now;func_symbol_val[lambda_name]=now.value;}
 	bool has_ref_capture=false;
 	for(bool by_ref:capture_is_ref)
 		has_ref_capture=has_ref_capture||by_ref;
@@ -984,7 +985,8 @@ void LambdaExpAST::pre_register()const
 		func_sigs[ref_lambda_name]={total_params,!type.empty(),false,has_self};
 		func_table[ref_lambda_name]=!type.empty();
 		Symbol now(true,_total++);
-		symbol_table[ref_lambda_name]=now;
+		if(!symbol_table.count(ref_lambda_name))
+			symbol_table[ref_lambda_name]=now;
 		func_symbol_val[ref_lambda_name]=now.value;
 	}
 }
@@ -1118,8 +1120,15 @@ Result FuncDefAST::print()const
 		func_table[ident]=true;
 	symbol_stack.push_back({});
 	string str;
-	if(builtin_funcs.count(ident))
+	if(ident=="main")
 		str="@"+ident;
+	else if(builtin_funcs.count(ident)||ident=="__fp_env"||ident=="__fp_env_sp")
+	{
+		Symbol now(true,_total++);
+		symbol_table[ident]=now;
+		func_symbol_val[ident]=now.value;
+		str=now;
+	}
 	else
 		str=symbol_table[ident];
 	out<<"fun "<<str<<"(";
@@ -1697,10 +1706,10 @@ Result UnaryExpAST::print()const
 		if(is_direct)
 		{
 			string str;
-			if(builtin_funcs.count(target_func))
-				str="@"+target_func;
-			else
-				str=symbol_table[target_func];
+		if(builtin_funcs.count(target_func)&&!symbol_table.count(target_func))
+			str="@"+target_func;
+		else
+			str=symbol_table[target_func];
 			if(returns_int)
 			{
 				Result now(false,_total++);
