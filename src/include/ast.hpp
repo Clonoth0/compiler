@@ -213,7 +213,7 @@ class VarDefAST:public BaseAST
 		optional<node>init;
 		bool func_ptr;
 		unique_ptr<vector<node>>inner_params;
-		bool is_auto;
+		bool is_auto=false;
 		Result print()const override;
 };
 class InitValAST:public BaseAST
