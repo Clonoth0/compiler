@@ -384,180 +384,19 @@ static Result print_call_arg(const node &arg)
 }
 static void emit_fp_helper(int n,bool returns_int)
 {
-	vector<pair<int,string>>cands;
-	vector<tuple<int,string,int>>env_cands;
-	for(const auto &[name,id]:func_id)
-	{
-		auto it=func_sigs.find(name);
-		if(it==func_sigs.end())
-			continue;
-		if(builtin_funcs.count(name))
-			continue;
-		if(it->second.returns_int!=returns_int||!it->second.all_i32_params||it->second.has_self_param)
-			continue;
-		if(it->second.param_count==n)
-			cands.emplace_back(id,name);
-		if(it->second.param_count>=n&&it->second.param_count<=n+FP_CAP_SLOTS)
-			env_cands.emplace_back(id,name,it->second.param_count-n);
-	}
-	sort(cands.begin(),cands.end());
-	sort(env_cands.begin(),env_cands.end());
 	string helper_name="__fp_"+to_string(n)+"_"+(returns_int?"i32":"void");
-	string default_label="%"+helper_name+"_default";
+	if(!func_symbol_val.count(helper_name))
+	{
+		Symbol now(true,_total++);
+		symbol_table[helper_name]=now;
+		func_symbol_val[helper_name]=now.value;
+		builtin_funcs.insert(helper_name);
+	}
 	out<<"fun @"+helper_name<<"(%fid: i32";
 	for(int i=0;i<n;++i)
 		out<<", %a"<<i<<": i32";
 	out<<")"<<(returns_int?" : i32":"")<<" {\n";
 	out<<"%entry_"+helper_name<<":\n";
-	if(!env_cands.empty())
-	{
-		string direct_label="%"+helper_name+"_direct";
-		string env_label="%"+helper_name+"_env";
-		Result is_env(false,_total++);
-		out<<"\t"<<is_env<<" = ge %fid, "<<FP_ENV_BASE<<"\n";
-		out<<"\tbr "<<is_env<<", "<<env_label<<", "<<direct_label<<"\n";
-		out<<env_label<<":\n";
-		Result row(false,_total++);
-		out<<"\t"<<row<<" = sub %fid, "<<FP_ENV_BASE<<"\n";
-		Result base_pos(false,_total++);
-		out<<"\t"<<base_pos<<" = mul "<<row<<", "<<FP_ENV_WORDS<<"\n";
-		Symbol func_slot(true,_total++);
-		out<<"\t"<<func_slot<<" = getelemptr "<<Symbol(true,func_symbol_val["__fp_env"])<<", "<<base_pos<<"\n";
-		Result real_fid(false,_total++);
-		out<<"\t"<<real_fid<<" = load "<<func_slot<<"\n";
-		vector<Result>caps;
-		for(int i=0;i<FP_CAP_SLOTS;++i)
-		{
-			Result pos(false,_total++);
-			out<<"\t"<<pos<<" = add "<<base_pos<<", "<<(i+1)<<"\n";
-			Symbol slot(true,_total++);
-			out<<"\t"<<slot<<" = getelemptr "<<Symbol(true,func_symbol_val["__fp_env"])<<", "<<pos<<"\n";
-			Result cap(false,_total++);
-			out<<"\t"<<cap<<" = load "<<slot<<"\n";
-			caps.push_back(cap);
-		}
-		string env_default="%"+helper_name+"_env_default";
-		if(!env_cands.empty())
-			out<<"\tjump %"<<helper_name<<"_env_check_0\n";
-		for(size_t idx=0;idx<env_cands.size();++idx)
-		{
-			auto [id,name,hidden]=env_cands[idx];
-			string check_label="%"+helper_name+"_env_check_"+to_string(idx);
-			string case_label="%"+helper_name+"_env_case_"+to_string(idx);
-			string next_label=(idx+1<env_cands.size())?"%"+helper_name+"_env_check_"+to_string(idx+1):env_default;
-			out<<check_label<<":\n";
-			Result cond(false,_total++);
-			out<<"\t"<<cond<<" = eq "<<real_fid<<", "<<id<<"\n";
-			out<<"\tbr "<<cond<<", "<<case_label<<", "<<next_label<<"\n";
-			out<<case_label<<":\n";
-			string target=string(Symbol(true,func_symbol_val[name]));
-			if(returns_int)
-			{
-				Result now(false,_total++);
-				out<<"\t"<<now<<" = call "<<target<<"(";
-				bool first=true;
-				for(int i=0;i<hidden;++i)
-				{
-					if(!first)
-						out<<", ";
-					first=false;
-					out<<caps[i];
-				}
-				for(int i=0;i<n;++i)
-				{
-					if(!first)
-						out<<", ";
-					first=false;
-					out<<"%a"<<i;
-				}
-				out<<")\n";
-				out<<"\tret "<<now<<"\n";
-			}
-			else
-			{
-				out<<"\tcall "<<target<<"(";
-				bool first=true;
-				for(int i=0;i<hidden;++i)
-				{
-					if(!first)
-						out<<", ";
-					first=false;
-					out<<caps[i];
-				}
-				for(int i=0;i<n;++i)
-				{
-					if(!first)
-						out<<", ";
-					first=false;
-					out<<"%a"<<i;
-				}
-				out<<")\n";
-				out<<"\tret\n";
-			}
-		}
-		out<<env_default<<":\n";
-		if(returns_int)
-			out<<"\tret 0\n";
-		else
-			out<<"\tret\n";
-		out<<direct_label<<":\n";
-		if(cands.empty())
-			out<<"\tjump "<<default_label<<"\n";
-		else
-			out<<"\tjump %"<<helper_name<<"_check_0\n";
-	}
-	else if(cands.empty())
-		out<<"\tjump "<<default_label<<"\n";
-	else
-		out<<"\tjump %"<<helper_name<<"_check_0\n";
-	if(cands.empty())
-	{
-		out<<default_label<<":\n";
-		if(returns_int)
-			out<<"\tret 0\n";
-		else
-			out<<"\tret\n";
-		out<<"}\n";
-		return;
-	}
-	for(size_t idx=0;idx<cands.size();++idx)
-	{
-		string check_label="%"+helper_name+"_check_"+to_string(idx);
-		string case_label="%"+helper_name+"_case_"+to_string(idx);
-		string next_label=(idx+1<cands.size())?"%"+helper_name+"_check_"+to_string(idx+1):default_label;
-		out<<check_label<<":\n";
-		Result cond(false,_total++);
-		out<<"\t"<<cond<<" = eq %fid, "<<cands[idx].first<<"\n";
-		out<<"\tbr "<<cond<<", "<<case_label<<", "<<next_label<<"\n";
-		out<<case_label<<":\n";
-		string target=string(Symbol(true,func_symbol_val[cands[idx].second]));
-		if(returns_int)
-		{
-			Result now(false,_total++);
-			out<<"\t"<<now<<" = call "<<target<<"(";
-			for(int i=0;i<n;++i)
-			{
-				if(i)
-					out<<", ";
-				out<<"%a"<<i;
-			}
-			out<<")\n";
-			out<<"\tret "<<now<<"\n";
-		}
-		else
-		{
-			out<<"\tcall "<<target<<"(";
-			for(int i=0;i<n;++i)
-			{
-				if(i)
-					out<<", ";
-				out<<"%a"<<i;
-			}
-			out<<")\n";
-			out<<"\tret\n";
-		}
-	}
-	out<<default_label<<":\n";
 	if(returns_int)
 		out<<"\tret 0\n";
 	else
@@ -612,47 +451,26 @@ static void emit_dispatch_chain(const Result &fid,const vector<tuple<int,string,
 		out<<"\tbr "<<cond<<", "<<case_label<<", "<<next_label<<"\n";
 		need_jump=false;
 		add_basic_block(case_label);
-		string target=string(Symbol(true,func_symbol_val[name]));
+		int total_n=hidden_count+(int)args.size();
+		string call_target="@__fp_"+to_string(total_n)+"_"+(returns_int?"i32":"void");
 		if(returns_int)
 		{
 			Result now(false,_total++);
-			out<<"\t"<<now<<" = call "<<target<<"(";
-			bool first=true;
+			out<<"\t"<<now<<" = call "<<call_target<<"("<<id;
 			for(int i=0;i<hidden_count&&i<(int)hidden.size();++i)
-			{
-				if(!first)
-					out<<", ";
-				first=false;
-				out<<hidden[i];
-			}
+				out<<", "<<hidden[i];
 			for(auto &arg:args)
-			{
-				if(!first)
-					out<<", ";
-				first=false;
-				out<<arg;
-			}
+				out<<", "<<arg;
 			out<<")\n";
 			_store(now,*ret_slot);
 		}
 		else
 		{
-			out<<"\tcall "<<target<<"(";
-			bool first=true;
+			out<<"\tcall "<<call_target<<"("<<id;
 			for(int i=0;i<hidden_count&&i<(int)hidden.size();++i)
-			{
-				if(!first)
-					out<<", ";
-				first=false;
-				out<<hidden[i];
-			}
+				out<<", "<<hidden[i];
 			for(auto &arg:args)
-			{
-				if(!first)
-					out<<", ";
-				first=false;
-				out<<arg;
-			}
+				out<<", "<<arg;
 			out<<")\n";
 		}
 		check_ex();
@@ -967,6 +785,25 @@ Result ProgramAST::print()const
 			--indeg[next];
 	}
 	lambda_emit_order=ordered_lambdas;
+	next_func_id=0;
+	for(const auto &def:*defs)
+	{
+		auto fd=dynamic_cast<FuncDefAST*>(def.get());
+		if(fd&&!builtin_funcs.count(fd->ident)&&fd->ident!="main"&&!def->has_func_ptr_params())
+			func_id[fd->ident]=next_func_id++;
+	}
+	for(const auto *lambda:lambda_emit_order)
+	{
+		func_id[lambda->lambda_name]=next_func_id++;
+		if(!lambda->ref_lambda_name.empty())
+			func_id[lambda->ref_lambda_name]=next_func_id++;
+	}
+	for(const auto &def:*defs)
+	{
+		auto fd=dynamic_cast<FuncDefAST*>(def.get());
+		if(fd&&!builtin_funcs.count(fd->ident)&&fd->ident!="main"&&def->has_func_ptr_params())
+			func_id[fd->ident]=next_func_id++;
+	}
 	symbol_stack.push_back({});
 	auto emit=[&](bool fp,bool include_main)
 	{
@@ -982,7 +819,7 @@ Result ProgramAST::print()const
 				continue;
 			if(def->has_func_ptr_params()==fp)
 			{
-				if(fd&&!builtin_funcs.count(fd->ident))
+				if(fd&&!builtin_funcs.count(fd->ident)&&!func_id.count(fd->ident))
 					func_id[fd->ident]=next_func_id++;
 				is_global=true;
 				def->print();
@@ -990,13 +827,13 @@ Result ProgramAST::print()const
 		}
 	};
 	emit(false,false);
-	for(const auto *lambda:lambda_emit_order)
-		lambda->print_body();
-	for(int n=0;n<=16;++n)
+	for(int n=0;n<=24;++n)
 	{
 		emit_fp_helper(n,true);
 		emit_fp_helper(n,false);
 	}
+	for(const auto *lambda:lambda_emit_order)
+		lambda->print_body();
 	emit(true,false);
 	emit(false,true);
 	return Result();
@@ -1130,7 +967,6 @@ void LambdaExpAST::pre_register()const
 	for(const auto &p:*params){auto lp=dynamic_cast<LambdaParamAST*>(p.get());if(lp->is_self){has_self=true;self_name=lp->ident;}else ++user_count;}
 	collect_captures();
 	int total_params=captures.size()+user_count+(has_self?1:0);
-	func_id[lambda_name]=next_func_id++;
 	func_sigs[lambda_name]={total_params,!type.empty(),true,has_self};
 	func_table[lambda_name]=!type.empty();
 	if(!builtin_funcs.count(lambda_name)){Symbol now(true,_total++);symbol_table[lambda_name]=now;func_symbol_val[lambda_name]=now.value;}
@@ -1140,7 +976,6 @@ void LambdaExpAST::pre_register()const
 	if(has_ref_capture)
 	{
 		ref_lambda_name="__lambda_ref_"+to_string(next_lambda_id++);
-		func_id[ref_lambda_name]=next_func_id++;
 		func_sigs[ref_lambda_name]={total_params,!type.empty(),false,has_self};
 		func_table[ref_lambda_name]=!type.empty();
 		Symbol now(true,_total++);
