@@ -1,0 +1,12 @@
+int main()
+{
+	int z=5;
+	auto f=[=](auto &self,int n,int (*p)(int,int,int))->int
+	{
+		if(!n)
+			return p(z,z,z);
+		else
+			return self(self,n-1,[=](int x,int y,int z)->int{return p(x,y,n)+p(y,z,x)+n*z;});
+	};
+	return f(f,3,[](int x,int y,int z)->int{return x+y+z;});
+}
