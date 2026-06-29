@@ -29,8 +29,8 @@ SysY 是北京大学编译原理课程使用的一种教学语言，其核心语
 - **后端**（Koopa IR → RISC-V）：通过 libkoopa 解析文本 IR，进行寄存器分配和 RISC-V 汇编生成
 
 代码量总计约 4600 行（`src/` 目录下），其中：
-- `ast.cpp`（2278 行）：AST 节点实现、Koopa IR 生成、lambda 降低
-- `asm.cpp`（1044 行）：Koopa 到 RISC-V 翻译、寄存器分配、栈帧管理
+- `ast.cpp`（2292 行）：AST 节点实现、Koopa IR 生成、lambda 降低
+- `asm.cpp`（1045 行）：Koopa 到 RISC-V 翻译、寄存器分配、栈帧管理
 - `sysy.y`（802 行）：语法分析器
 - `sysy.l`（75 行）：词法分析器
 - `ast.hpp`（348 行）：AST 节点声明
@@ -122,7 +122,7 @@ RISC-V 汇编 (RV32IM)
 由于 Koopa IR 不支持真正的函数指针类型，本项目使用**整数函数编号**模拟。核心机制包括：
 
 - **函数编号（func_id）**：每个普通函数和 lambda 都有唯一整数编号（从 0 开始）
-- **闭包环境表（__fp_env）**：全局数组，每行 9 个 `i32`（slot 0 = 函数编号，slot 1-8 = 8 个捕获值）
+- **闭包环境表（__fp_env）**：全局数组，每行 `1 + max_captures` 个 `i32`（slot 0 = 函数编号，slot 1..N = N 个捕获值）。`max_captures` 在编译时根据程序中 lambda 的最大捕获数动态计算，不再使用固定值 8。
 - **环境基址（FP_ENV_BASE = 1000000）**：当 func_id ≥ 1000000 时，表示这是一个闭包环境引用
 
 调用一个函数指针时，编译器的分发流程如下：
@@ -131,10 +131,10 @@ RISC-V 汇编 (RV32IM)
 callee_val = load function pointer variable
 
 if callee_val >= FP_ENV_BASE:
-    row = (callee_val - FP_ENV_BASE) * 9       # 计算环境表行号
-    real_fid = __fp_env[ row*4 ]               # 取出真实函数编号
-    caps = __fp_env[ row*4 + 4 ] ..            # 取出 8 个捕获值
-    call @__fp_N_i32(real_fid, caps..., args...) # 分发到真实函数
+    row = (callee_val - FP_ENV_BASE) * (1 + max_captures)
+    real_fid = __fp_env[ row*4 ]
+    caps = __fp_env[ row*4 + 4 .. row*4 + max_captures*4 ]
+    call @__fp_N_i32(real_fid, caps..., args...)
 else:
     # 直接函数指针
     call @__fp_N_i32(callee_val, args...)      # 直接分发
@@ -315,8 +315,8 @@ ProgramAST
 #### 全局数据
 
 ```llvm
-global %_0 = alloc i32, zeroinit          # 环境表计数器
-global %_1 = alloc [i32, 2304], zeroinit  # 闭包环境表 (9 * 256)
+global %_0 = alloc i32, zeroinit                    # 环境表计数器
+global %_1 = alloc [i32, 256*(1+max_captures)], zeroinit  # 闭包环境表（动态大小）
 ```
 
 #### 分派 stub（@__fp_N_i32）
@@ -540,7 +540,7 @@ main:
 
 ### 4.1 后端 Bug 修复
 
-在实现 RISC-V 代码生成过程中，发现并修复了 6 个关键 bug：
+在实现 RISC-V 代码生成过程中，发现并修复了 8 个关键 bug：
 
 #### Bug 1: rc.release() 不 spill 脏值
 
@@ -567,7 +567,7 @@ if(dirty.count(v))
 
 #### Bug 4: ptr_value.count 应为 insert
 
-第 758 行：`ptr_value.count(value)` 仅检查成员关系（返回 bool，丢弃），应为 `ptr_value.insert(value)`。这导致加载指针类型 alloc 的结果未被标记为指针，后续无法正确解引用。
+第 758 行：`ptr_value.count(value)` 仅检查成员关系（返回 bool，丢弃），应为 `ptr_value.insert(value)`。这导致加载指针类型 alloc 的结果未被标记为指针，ref ABI 调用时无法正确解引用。
 
 #### Bug 5: visit(call) 不区分参数类型
 
@@ -575,7 +575,7 @@ if(dirty.count(v))
 
 **修复**：检查 callee 的参数类型，若为 `KOOPA_RTT_POINTER`，使用 `load_addr()`。
 
-#### Bug 6: Koopa IR 前向引用
+#### Bug 6: Koopa IR 前向引用（fp10.2 编译崩溃）
 
 当两个 lambda 互相引用时（如 fp10.2.cpp 中的两个回调 lambda），`%_3` 的 dispatch chain 引用 `%_4`，但 `%_4` 的 body 在 Koopa 文本中排在 `%_3` 之后。Koopa 文本解析器不支持函数前向引用。
 
@@ -583,6 +583,25 @@ if(dirty.count(v))
 1. `emit_fp_helper` 改为 stub body（仅 `ret 0`），不再包含对 `%_N` 的直接调用
 2. `emit_dispatch_chain` 中的 dispatch case 改为调用 `@__fp_N_i32(id, args...)` 而非 `%target(args...)`
 3. 拓扑排序后按发射顺序重新分配 `func_id`，确保与 `__fp_table` 索引一致
+
+#### Bug 7: visit(get_elem_ptr)/visit(get_ptr) 指针值未备份到栈
+
+`visit(get_elem_ptr)` 和 `visit(get_ptr)` 通过 `rc.set()` 将指针值放入寄存器但未备份到栈。当 `flush_all()` 只 flush t-reg 时，s-reg 中的指针值在调用前丢失，导致传递空指针到子函数。
+
+**修复**：在 `rc.set()` 后增加 `_sw(reg, "sp", addr.query(value))`，确保指针值在栈上有备份。
+
+#### Bug 8: 用户标识符与编译器内部名冲突
+
+三类名称冲突导致编译器崩溃：
+- **内置函数同名**：用户定义 `int putint()` 时，`FuncDefAST::print()` 使用 `@putint` 前缀与 `decl @putint` 声明冲突
+- **内部全局同名**：用户定义 `int __fp_env()` 覆盖编译器的环境表符号
+- **Lambda 生成名冲突**：用户定义 `int __lambda_0()` 与编译器生成的 lambda 名碰撞
+
+**修复**：
+1. `FuncDefAST::print()`：对内置同名用户函数分配独立的 `%N` 符号；`main` 保持 `@main`
+2. `FuncDefAST::pre_register()`：对 `__fp_env`/`__fp_env_sp` 跳过符号表注册
+3. `LambdaExpAST::pre_register()`：写入 `symbol_table` 前检查是否已被用户占用
+4. 调用点：当 `symbol_table` 已有用户函数入口时优先使用
 
 ### 4.2 后端实现要点
 
@@ -604,6 +623,22 @@ if(inst->kind.tag == KOOPA_RVT_ALLOC) {
 }
 ```
 
+`RegCache` 中使用 `flush_all()` 在函数调用前将 t-reg 脏值写入栈。对于 s-reg 中保存的指针值（getelemptr/getptr 结果），通过在 `rc.set()` 后立即 `_sw` 到栈的方式确保跨调用安全。
+
+### 4.3 捕获上限动态化
+
+原先硬编码 `FP_CAP_SLOTS = 8`（每闭包最多 8 个捕获值）。改进为在 `ProgramAST::print()` 中扫描所有 lambda 的 `captures.size()`，取最大值作为 `cap_slots_limit`：
+
+```cpp
+int max_captures = 1;
+for (const auto *lambda : lambda_emit_order)
+    max_captures = max(max_captures, (int)lambda->captures.size());
+cap_slots_limit = max_captures;
+FP_ENV_WORDS = 1 + cap_slots_limit;
+```
+
+全局环境表大小、`emit_fp_call_inline` 中的捕获槽循环、dispatch candidate 筛选上限均使用 `cap_slots_limit` 变量而非固定常量 8。无 lambda 时取默认值 1。测试验证：12 值捕获 lambda 正常编译运行（test 92，预期 157）。
+
 ## 5. 达成效果
 
 ### 5.1 测试结果
@@ -612,8 +647,8 @@ if(inst->kind.tag == KOOPA_RVT_ALLOC) {
 
 | 测试集 | 结果 | 备注 |
 |--------|------|------|
-| `sysy-testsuit-collection` | **466/467 通过** | 仅 `matrix-1` 超时（性能问题，预先存在） |
-| `fp_tests`（lambda 专项） | **78/78 通过** | 含新增 test 91：fp10.2 双 FP 递归 |
+| `sysy-testsuit-collection` | **466/467 通过** | 仅 `matrix-1` 超时（O(n!) 算法 + n=10，性能限制） |
+| `fp_tests`（lambda 专项） | **79/79 通过** | 含 fp10.2 双 FP 递归，及 12 值捕获测试 |
 
 #### fp_tests 新增测试
 
@@ -629,6 +664,7 @@ if(inst->kind.tag == KOOPA_RVT_ALLOC) {
 | 89 | fp10_multi_step | fp10 多步骤压缩 | 44 |
 | 90 | fp10_multi_arg_fp | fp10 三参数函数指针 | 157 |
 | 91 | fp10.2_multi_fp | fp10.2 双 FP 递归 | 84 |
+| 92 | 12_captures | 12 值捕获 + 递归链 | 157 |
 
 ### 5.2 支持的功能总结
 
@@ -650,7 +686,7 @@ if(inst->kind.tag == KOOPA_RVT_ALLOC) {
 | 混合值/引用捕获 | ✅ |
 | void lambda + 引用写回 | ✅ |
 | 多级嵌套捕获 | ✅ |
-| 最多 8 个值/引用捕获 | ✅ |
+| **动态计算捕获上限**（不再硬编码 8） | ✅ 支持 12 值捕获 |
 | 名称遮蔽下的捕获 | ✅ |
 | 分支中创建闭包并逃逸 | ✅ |
 | `putint`/`putch`/`getint`/`getch`/`getarray` | ✅ |
@@ -659,12 +695,13 @@ if(inst->kind.tag == KOOPA_RVT_ALLOC) {
 
 | 限制 | 说明 |
 |------|------|
-| 最多 8 个捕获值 | `FP_CAP_SLOTS = 8` |
+| 捕获上限动态计算 | 编译时根据 lambda 最大捕获数确定，不再硬编码 8 |
 | 无显式捕获列表 | 不支持 `[x, &y]` 等 |
 | 无 `mutable` lambda | — |
 | 无泛型 lambda 参数 | `auto` 仅用于 `auto &self` |
 | 不支持捕获数组/结构体 | — |
 | Koopa 文本不支持前向引用 | 已通过 @__fp_* stub 机制绕过 |
+| 超长标识符（>2000 字符） | `ProgramAST::print()` 重构引入的已知问题（085/097_var_name） |
 
 ## 6. 参考文献
 
