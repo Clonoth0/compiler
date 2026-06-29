@@ -795,6 +795,7 @@ void visit(const koopa_raw_get_ptr_t &i,const koopa_raw_value_t &value)
 		rc.free_pool_reg(idx_reg);
 	rc.release(i.src);
 	rc.set(value,src_reg);
+	_sw(src_reg,"sp",addr.query(value));
 	ptr_value.insert(value);
 }
 void visit(const koopa_raw_get_elem_ptr_t &i,const koopa_raw_value_t &value)
@@ -817,6 +818,7 @@ void visit(const koopa_raw_get_elem_ptr_t &i,const koopa_raw_value_t &value)
 	if(ptr_value.count(i.src))
 		rc.release(i.src);
 	rc.set(value,addr_reg);
+	_sw(addr_reg,"sp",addr.query(value));
 	ptr_value.insert(value);
 }
 void visit(const koopa_raw_binary_t &i,const koopa_raw_value_t &value)
