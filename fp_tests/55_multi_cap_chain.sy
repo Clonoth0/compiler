@@ -1,0 +1,12 @@
+int main()
+{
+	int a=1,b=2,c=3;
+	auto chain=[=](auto &self,int n,int (*p)(int))->int
+	{
+		if(!n)
+			return p(a);
+		else
+			return self(self,n-1,[=](int x)->int{return p(x+a*b+c);});
+	};
+	return chain(chain,3,[](int x)->int{return x;});
+}

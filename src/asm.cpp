@@ -433,8 +433,12 @@ class RegCache
 			if(it==v2r.end())
 				return;
 			string r=it->second;
+			if(dirty.count(v))
+			{
+				_sw(r,"sp",addr.query(v));
+				dirty.erase(v);
+			}
 			r2v.erase(r);
-			dirty.erase(v);
 			v2r.erase(it);
 			pool.push_back(r);
 		}
@@ -748,8 +752,10 @@ void visit(const koopa_raw_load_t &i,const koopa_raw_value_t &value)
 		else
 			_lw(result_reg,"sp",addr.query(i.src));
 	rc.set(value,result_reg);
+	int addr_val = addr.query(value);
+	_sw(result_reg, "sp", addr_val);
 	if(ptr2_value.count(i.src))
-		ptr_value.count(value);
+		ptr_value.insert(value);
 }
 void visit(const koopa_raw_store_t &i)
 {
@@ -802,6 +808,7 @@ void visit(const koopa_raw_get_elem_ptr_t &i,const koopa_raw_value_t &value)
 		load_addr(addr_reg,i.src);
 	}
 	string idx_reg=rc.get(i.index);
+	rc.release(i.index);
 	_add(idx_reg,idx_reg,idx_reg);
 	_add(idx_reg,idx_reg,idx_reg);
 	_add(addr_reg,addr_reg,idx_reg);
@@ -953,13 +960,34 @@ void visit(const koopa_raw_call_t &i,const koopa_raw_value_t &value)
 	for(int j=0;j<len;++j)
 	{
 		auto val=reinterpret_cast<koopa_raw_value_t>(i.args.buffer[j]);
+		bool is_ptr=false;
+		if(i.callee->params.len>(size_t)j)
+		{
+			auto p=reinterpret_cast<koopa_raw_value_t>(i.callee->params.buffer[j]);
+			if(p->ty->tag==KOOPA_RTT_POINTER)
+				is_ptr=true;
+		}
 		if(j<8)
 		{
 			string cached=rc.find_reg(val);
 			if(!cached.empty())
-				_mv("a"+to_string(j),cached);
+			{
+				if(is_ptr)
+				{
+					rc.flush_all();
+					rc.invalidate();
+					load_addr("a"+to_string(j),val);
+				}
+				else
+					_mv("a"+to_string(j),cached);
+			}
 			else
-				load("a"+to_string(j),val);
+			{
+				if(is_ptr)
+					load_addr("a"+to_string(j),val);
+				else
+					load("a"+to_string(j),val);
+			}
 		}
 		else
 		{

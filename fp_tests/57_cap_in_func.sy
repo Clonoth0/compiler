@@ -1,1 +1,0 @@
-int apply(int (*f)(int),int x){return f(x);} int times2(int x){return x*2;} int add3(int x){return x+3;} int main(){return apply(times2,7)+apply(add3,4);}

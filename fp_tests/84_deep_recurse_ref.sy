@@ -1,0 +1,16 @@
+int main()
+{
+	int a=1,b=2,c=3;
+	auto f=[&](auto &self,int n,int x)->int
+	{
+		if(!n)
+		{
+			a=a+x;b=b+x;
+			return a+b+c;
+		}
+		int r=self(self,n-1,x);
+		a=a+x*x;
+		return r+a+b+c;
+	};
+	return f(f,3,2);
+}

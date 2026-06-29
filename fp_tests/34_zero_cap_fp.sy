@@ -1,7 +1,0 @@
-int main()
-{
-	auto a=[](int x)->int{return x+1;};
-	int (*p)(int);
-	p=a;
-	return p(5);
-}

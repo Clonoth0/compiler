@@ -6,8 +6,8 @@ int main()
 		if(!n)
 			return p(z);
 		else
-			return self(self,n-1,[=](int x)->int{return p(x+n+z);});
+			return self(self,n-1,[=](int x) -> int {return p(x + n + z);});
 	};
 	int n=5;
-	return f(f,n,[](int x)->int{return x;});
+	return f(f,n,[](int x)->int{ return x; });
 }

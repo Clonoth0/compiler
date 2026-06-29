@@ -1,7 +1,0 @@
-int main()
-{
-	auto id=[](int x)->int{return x;};
-	auto dbl=[](int x)->int{return x+x;};
-	auto sqr=[](int x)->int{return x*x;};
-	return sqr(dbl(id(5)));
-}

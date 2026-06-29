@@ -1,0 +1,12 @@
+int f(int x,int y,int (*p)(int,int)){return p(x,y);}
+int add(int x,int y){return x+y;}
+int mul(int x,int y){return x*y;}
+int main()
+{
+	int a=20;
+	int (*op)(int,int)=add;
+	int v1=f(3,4,op);
+	op=mul;
+	int v2=f(3,4,op);
+	return v1+v2+a;
+}

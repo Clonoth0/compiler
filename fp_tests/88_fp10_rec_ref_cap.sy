@@ -1,0 +1,12 @@
+int main()
+{
+	int acc=0;
+	auto sum=[&](auto &self,int n,int (*p)(int))->int
+	{
+		if(!n)
+			return p(acc);
+		acc=acc+n;
+		return self(self,n-1,p);
+	};
+	return sum(sum,5,[](int x)->int{return x;});
+}

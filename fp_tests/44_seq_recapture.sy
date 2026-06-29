@@ -1,1 +1,0 @@
-int main(){int a=10,b=20,c=30;auto f=[&](int x)->int{return x+a;};auto g=[&](int x)->int{return x+b;};auto h=[&](int x)->int{return x+c;};int (*arr)(int);arr=f;int s=arr(1);arr=g;s=s+arr(2);arr=h;s=s+arr(3);return s;}

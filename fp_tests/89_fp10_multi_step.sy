@@ -1,0 +1,15 @@
+int main()
+{
+	int z=2;
+	auto f=[=](auto &self,int n,int (*p)(int))->int
+	{
+		if(!n)
+			return p(z);
+		else
+		{
+			int t=n*z;
+			return self(self,n-1,[=](int x)->int{return p(x+t);});
+		}
+	};
+	return f(f,6,[](int x)->int{return x;});
+}
