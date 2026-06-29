@@ -31,10 +31,10 @@ struct FuncSig
 	bool all_i32_params;
 	bool has_self_param;
 };
-static constexpr int FP_CAP_SLOTS=8;
 static constexpr int FP_ENV_BASE=1000000;
 static constexpr int FP_ENV_LIMIT=256;
-static constexpr int FP_ENV_WORDS=1+FP_CAP_SLOTS;
+static int FP_ENV_WORDS=9;
+static int cap_slots_limit=8;
 static unordered_map<string,int>func_id;
 static unordered_map<string,int>func_symbol_val;
 static unordered_map<string,FuncSig>func_sigs;
@@ -282,7 +282,7 @@ static Result fp_env_store_new(const Result &func_value,const vector<Result> &ca
 	auto func_slot=_getelemptr(Symbol(true,func_symbol_val["__fp_env"]),_mul(sp,Result(true,FP_ENV_WORDS)));
 	ptr_value.insert(func_slot);
 	_store(func_value,func_slot);
-	for(int i=0;i<FP_CAP_SLOTS;++i)
+	for(int i=0;i<cap_slots_limit;++i)
 	{
 		auto slot=_getelemptr(Symbol(true,func_symbol_val["__fp_env"]),_add(_mul(sp,Result(true,FP_ENV_WORDS)),Result(true,i+1)));
 		ptr_value.insert(slot);
@@ -416,7 +416,7 @@ static vector<tuple<int,string,int>> fp_dispatch_candidates(int n,bool returns_i
 			continue;
 		if(env)
 		{
-			if(sig.param_count>=n&&sig.param_count<=n+FP_CAP_SLOTS)
+			if(sig.param_count>=n&&sig.param_count<=n+cap_slots_limit)
 				cands.emplace_back(id,name,sig.param_count-n);
 		}
 		else if(sig.param_count==n)
@@ -508,7 +508,7 @@ static Result emit_fp_call_inline(const Result &callee_val,const vector<Result> 
 	Result real_fid(false,_total++);
 	out<<"\t"<<real_fid<<" = load "<<func_slot<<"\n";
 	vector<Result>hidden;
-	for(int i=0;i<FP_CAP_SLOTS;++i)
+	for(int i=0;i<cap_slots_limit;++i)
 	{
 		Result pos(false,_total++);
 		out<<"\t"<<pos<<" = add "<<base_pos<<", "<<(i+1)<<"\n";
@@ -716,12 +716,17 @@ Result ProgramAST::print()const
 	}
 	for(const auto &def:*defs)
 		def->pre_register();
-	out<<"global "<<Symbol(true,func_symbol_val["__fp_env_sp"])<<" = alloc i32, zeroinit\n";
-	out<<"global "<<Symbol(true,func_symbol_val["__fp_env"])<<" = alloc [i32, "<<(FP_ENV_LIMIT*FP_ENV_WORDS)<<"], zeroinit\n";
 	vector<const LambdaExpAST*>lambda_emit_order;
 	unordered_set<const LambdaExpAST*>seen_lambdas;
 	for(const auto &def:*defs)
 		visit_lambdas(def,lambda_emit_order,seen_lambdas);
+	int max_captures=1;
+	for(const auto *lambda:lambda_emit_order)
+		max_captures=max(max_captures,(int)lambda->captures.size());
+	cap_slots_limit=max_captures;
+	FP_ENV_WORDS=1+cap_slots_limit;
+	out<<"global "<<Symbol(true,func_symbol_val["__fp_env_sp"])<<" = alloc i32, zeroinit\n";
+	out<<"global "<<Symbol(true,func_symbol_val["__fp_env"])<<" = alloc [i32, "<<(FP_ENV_LIMIT*FP_ENV_WORDS)<<"], zeroinit\n";
 	unordered_map<const LambdaExpAST*,int>lambda_index,indeg;
 	unordered_map<const LambdaExpAST*,vector<const LambdaExpAST*>>lambda_next;
 	for(size_t i=0;i<lambda_emit_order.size();++i)
@@ -1476,9 +1481,9 @@ Result VarDefAST::print()const
 				Result value;
 				if(init.has_value()){value=(*init)->print();_store(value,func_slot);}
 				symbol_insert(ident,func_slot);
-				const int FP_CAP_SLOTS=8;
-				vector<Symbol>cap_slots(FP_CAP_SLOTS);
-				for(int i=0;i<FP_CAP_SLOTS;++i){cap_slots[i]=_alloc();_store(Result(true,0),cap_slots[i]);}
+			const int SLOTS=cap_slots_limit;
+			vector<Symbol>cap_slots(SLOTS);
+				for(int i=0;i<cap_slots_limit;++i){cap_slots[i]=_alloc();_store(Result(true,0),cap_slots[i]);}
 				ClosureLayout cl;cl.func_slot=func_slot;cl.cap_slots=cap_slots;cl.has_self=false;cl.cap_count=0;closure_layouts[ident]=cl;
 				return value;
 			}
@@ -1909,7 +1914,7 @@ Result UnaryExpAST::print()const
 					continue;
 				if(sig.has_self_param)
 					continue;
-				if(sig.param_count<size||sig.param_count>size+FP_CAP_SLOTS)
+				if(sig.param_count<size||sig.param_count>size+cap_slots_limit)
 					continue;
 				if(sig.returns_int)
 					has_int=true;
