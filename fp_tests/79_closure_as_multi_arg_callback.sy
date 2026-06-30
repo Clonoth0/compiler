@@ -5,6 +5,6 @@ int apply2(int (*f)(int),int a,int b)
 int main()
 {
 	int base=6;
-	auto plus=[&](int x)->int{return x+base;};
+	auto plus=[=](int x)->int{return x+base;};
 	return apply2(plus,1,2);
 }

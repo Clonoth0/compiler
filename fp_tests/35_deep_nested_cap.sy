@@ -9,7 +9,7 @@ int outer(int (*g)(int),int x)
 }
 int main()
 {
-	auto f=[&](int x)->int
+	auto f=[=](int x)->int
 	{
 		int v=3;
 		return x+v;
