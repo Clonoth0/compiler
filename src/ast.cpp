@@ -833,10 +833,21 @@ Result ProgramAST::print()const
 		}
 	};
 	emit(false,false);
-	for(int n=0;n<=24;++n)
+	int max_fp_n=0;
+	bool need_void_helper=false;
+	for(const auto &[name,sig]:func_sigs)
+	{
+		if(builtin_funcs.count(name)||sig.has_self_param||!sig.all_i32_params)
+			continue;
+		max_fp_n=max(max_fp_n,sig.param_count);
+		if(!sig.returns_int)
+			need_void_helper=true;
+	}
+	for(int n=0;n<=max_fp_n;++n)
 	{
 		emit_fp_helper(n,true);
-		emit_fp_helper(n,false);
+		if(need_void_helper)
+			emit_fp_helper(n,false);
 	}
 	for(const auto *lambda:lambda_emit_order)
 		lambda->print_body();
