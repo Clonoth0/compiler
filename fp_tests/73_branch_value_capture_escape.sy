@@ -2,7 +2,7 @@ int main()
 {
 	int choose=0;
 	int base=7;
-	auto f=[=](int x)->int{return x+base;};
+	auto f=[&](int x)->int{return x+base;};
 	auto g=[](int x)->int{return x*3;};
 	int (*p)(int);
 	if(choose)

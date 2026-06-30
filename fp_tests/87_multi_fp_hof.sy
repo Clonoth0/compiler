@@ -5,7 +5,7 @@ int sub(int x, int y) { return x - y; }
 int main()
 {
 	int a=10;
-	auto hof=[=](int (*f)(int,int),int (*g)(int,int),int (*h)(int,int),int x,int y)->int
+	auto hof=[&](int (*f)(int,int),int (*g)(int,int),int (*h)(int,int),int x,int y)->int
 	{
 		int r1=f(x,y);
 		int r2=g(r1,a);

@@ -5,7 +5,7 @@ int add1(int x)
 int main()
 {
 	int base=10;
-	auto f=[=](int x)->int{return x+base;};
+	auto f=[&](int x)->int{return x+base;};
 	auto g=[&](int x)->int{return x+base*2;};
 	int (*p)(int);
 	p=f;
