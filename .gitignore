@@ -1,0 +1,15 @@
+*.DS_Store
+/build
+/build2
+/build-docker
+/build-debug-docker
+/fp10
+/fp10.o
+/fp10.generated.riscv
+/fp10.generated.koopa
+*.bak
+*.tmp
+*.new
+online-doc/
+sysy-testsuit-collection/
+/tc
