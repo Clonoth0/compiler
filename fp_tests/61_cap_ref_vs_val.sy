@@ -1,1 +1,0 @@
-int main(){int n=4;auto by_val=[=](int x)->int{return x+n;};auto by_ref=[&](int x)->int{return x+n;};n=9;return by_val(1)+by_ref(1);}

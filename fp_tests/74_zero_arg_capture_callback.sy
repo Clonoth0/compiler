@@ -5,7 +5,7 @@ int call0(int (*p)())
 int main()
 {
 	int x=4;
-	auto f=[=]()->int{return x+1;};
+	auto f=[&]()->int{return x+1;};
 	x=20;
 	auto g=[&]()->int{return x+2;};
 	return call0(f)+call0(g);
